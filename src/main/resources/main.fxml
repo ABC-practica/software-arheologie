@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Menu?>
+<?import javafx.scene.control.MenuBar?>
+<?import javafx.scene.control.MenuItem?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.StackPane?>
+
+<BorderPane prefHeight="768.0" prefWidth="1024.0" xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.project.MainController">
+    <top>
+        <MenuBar BorderPane.alignment="CENTER">
+            <menus>
+                <Menu mnemonicParsing="false" text="Fisier">
+                    <items>
+                        <MenuItem mnemonicParsing="false" onAction="#handleFileUpload" text="Incarca Model 3D" />
+                    </items>
+                </Menu>
+            </menus>
+        </MenuBar>
+    </top>
+    <center>
+        <StackPane fx:id="canvasPlaceholder" style="-fx-background-color: #2b2b2b;" BorderPane.alignment="CENTER">
+            <children>
+                <Label text="Zona de randare 3D va fi aici" textFill="WHITE" />
+            </children>
+        </StackPane>
+    </center>
+</BorderPane>
