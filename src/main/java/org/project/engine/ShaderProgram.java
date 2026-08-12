@@ -76,4 +76,10 @@ public class ShaderProgram
             GL30.glUniformMatrix4fv(uniformLocation, false, fb);
         }
     }
+
+    public void setUniform(String uniformName, int value)
+    {
+        int uniformLocation = GL30.glGetUniformLocation(programId, uniformName);
+        GL30.glUniform1i(uniformLocation, value);
+    }
 }

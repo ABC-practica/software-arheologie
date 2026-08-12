@@ -58,6 +58,9 @@ public class OpenGLRenderer implements Runnable
             shader.createVertexShader(Files.readString(Paths.get("src/main/resources/shaders/vertex.glsl")));
             shader.createFragmentShader(Files.readString(Paths.get("src/main/resources/shaders/fragment.glsl")));
             shader.link();
+            shader.bind();
+            shader.setUniform("texture1", 0);
+            shader.unbind();
         }
         catch (Exception e)
         {
