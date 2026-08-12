@@ -47,6 +47,14 @@ public class MainController
         if (renderThread != null && renderThread.isAlive()) {
             renderThread.interrupt();
         }
+        try
+        {
+            renderThread.sleep(500);
+        }
+        catch (InterruptedException e)
+        {
+            e.printStackTrace();
+        }
 
         OpenGLRenderer renderer = new OpenGLRenderer(modelPath, frameBufferImage);
         renderThread = new Thread(renderer);

@@ -74,10 +74,10 @@ public class OpenGLRenderer implements Runnable
         Matrix4f model = new Matrix4f().identity();
 
         ByteBuffer pixelBuffer = MemoryUtil.memAlloc(width * height * 4);
+        byte[] safePixelData = new byte[width * height * 4];
         PixelWriter pixelWriter = fxImage.getPixelWriter();
 
         GL30.glEnable(GL30.GL_DEPTH_TEST);
-        GL30.glPolygonMode(GL30.GL_FRONT_AND_BACK, GL30.GL_LINE);
 
         while (!Thread.interrupted()) {
             GL30.glClearColor(0.16f, 0.16f, 0.16f, 1.0f);
@@ -93,12 +93,13 @@ public class OpenGLRenderer implements Runnable
             shader.unbind();
 
             GL30.glReadPixels(0, 0, width, height, GL30.GL_BGRA, GL30.GL_UNSIGNED_BYTE, pixelBuffer);
+            pixelBuffer.get(safePixelData);
+            pixelBuffer.clear();
             Platform.runLater(() -> {
-                pixelWriter.setPixels(0, 0, width, height, PixelFormat.getByteBgraPreInstance(), pixelBuffer, width * 4);
+                pixelWriter.setPixels(0, 0, width, height, PixelFormat.getByteBgraPreInstance(), safePixelData, 0, width * 4);
             });
             try { Thread.sleep(16); } catch (InterruptedException e) { break; }
         }
-
         MemoryUtil.memFree(pixelBuffer);
     }
 }
