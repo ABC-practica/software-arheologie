@@ -1,0 +1,45 @@
+plugins {
+    id 'java'
+    id 'application'
+    id 'org.openjfx.javafxplugin' version '0.0.13'
+}
+
+repositories {
+    mavenCentral()
+}
+
+project.ext.lwjglVersion = "3.3.3"
+project.ext.jomlVersion = "1.10.5"
+
+switch ("".toString()) {
+    default:
+        project.ext.lwjglNatives = "natives-windows"
+        break
+}
+
+dependencies {
+    implementation "org.openjfx:javafx-controls:17"
+    implementation "org.openjfx:javafx-graphics:17"
+    implementation "org.openjfx:javafx-fxml:17"
+
+    implementation platform("org.lwjgl:lwjgl-bom:${lwjglVersion}")
+    implementation "org.lwjgl:lwjgl"
+    implementation "org.lwjgl:lwjgl-opengl"
+    runtimeOnly "org.lwjgl:lwjgl::${lwjglNatives}"
+    runtimeOnly "org.lwjgl:lwjgl-opengl::${lwjglNatives}"
+    implementation "org.lwjgl:lwjgl-assimp"
+    runtimeOnly "org.lwjgl:lwjgl-assimp::${lwjglNatives}"
+    implementation "org.lwjgl:lwjgl-glfw"
+    runtimeOnly "org.lwjgl:lwjgl-glfw::${lwjglNatives}"
+
+    implementation "org.joml:joml:${jomlVersion}"
+}
+
+javafx {
+    version = "17"
+    modules = [ 'javafx.controls', 'javafx.graphics', 'javafx.fxml' ]
+}
+
+application {
+    mainClass = 'org.project.Launcher'
+}
