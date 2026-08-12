@@ -67,7 +67,7 @@ public class OpenGLRenderer implements Runnable
 
         Matrix4f projection = new Matrix4f().perspective((float) Math.toRadians(45.0f), (float) width / height, 0.1f, 100.0f);
         Matrix4f view = new Matrix4f().lookAt(
-                0.0f, 0.0f, 5.0f,
+                0.0f, 0.0f, 20.0f,
                 0.0f, 0.0f, 0.0f,
                 0.0f, 1.0f, 0.0f
         );
