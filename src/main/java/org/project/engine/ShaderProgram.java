@@ -3,6 +3,7 @@ package org.project.engine;
 import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.system.MemoryStack;
+import org.joml.Vector3f;
 
 import java.nio.FloatBuffer;
 
@@ -75,5 +76,16 @@ public class ShaderProgram
             value.get(fb);
             GL30.glUniformMatrix4fv(uniformLocation, false, fb);
         }
+    }
+
+    public void setUniform(String uniformName, Vector3f value)
+    {
+        int uniformLocation = GL30.glGetUniformLocation(programId, uniformName);
+        GL30.glUniform3f(uniformLocation, value.x, value.y, value.z);
+    }
+
+    public void setUniform(String uniformName, int value) {
+        int uniformLocation = GL30.glGetUniformLocation(programId, uniformName);
+        GL30.glUniform1i(uniformLocation, value);
     }
 }
