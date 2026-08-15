@@ -7,7 +7,7 @@ import javafx.scene.image.WritableImage;
 import javafx.scene.layout.StackPane;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
-import org.project.engine.OpenGLRenderer;
+import org.project.engine.*;
 
 import java.io.File;
 
@@ -17,6 +17,11 @@ public class MainController
     private StackPane canvasPlaceholder;
 
     private Thread renderThread;
+
+    private OpenGLRenderer currentRenderer;
+    private int nextObjectId = 1;
+    private double lastMouseX = 0;
+    private double lastMouseY = 0;
 
     @FXML
     private void handleFileUpload(ActionEvent event)
@@ -36,30 +41,75 @@ public class MainController
 
     private void startRenderEngine(String modelPath)
     {
+        if (renderThread != null && renderThread.isAlive())
+        {
+            if (currentRenderer != null)
+            {
+                currentRenderer.queueModelLoad(modelPath);
+            }
+            return;
+        }
+
         canvasPlaceholder.getChildren().clear();
         WritableImage frameBufferImage = new WritableImage(800, 600);
         ImageView imageView = new ImageView(frameBufferImage);
+
         imageView.fitWidthProperty().bind(canvasPlaceholder.widthProperty());
         imageView.fitHeightProperty().bind(canvasPlaceholder.heightProperty());
         imageView.setPreserveRatio(true);
         canvasPlaceholder.getChildren().add(imageView);
 
-        if (renderThread != null && renderThread.isAlive()) {
-            renderThread.interrupt();
-        }
-        try
-        {
-            renderThread.sleep(500);
-        }
-        catch (InterruptedException e)
-        {
-            e.printStackTrace();
-        }
+        currentRenderer = new OpenGLRenderer(frameBufferImage);
 
-        OpenGLRenderer renderer = new OpenGLRenderer(modelPath, frameBufferImage);
-        renderThread = new Thread(renderer);
+        imageView.setOnMousePressed(event -> {
+            double viewW = imageView.getLayoutBounds().getWidth();
+            double viewH = imageView.getLayoutBounds().getHeight();
+
+            double scale = Math.min(viewW / 800.0, viewH / 600.0);
+            double actualW = 800.0 * scale;
+            double actualH = 600.0 * scale;
+
+            double offsetX = (viewW - actualW) / 2.0;
+            double offsetY = (viewH - actualH) / 2.0;
+
+            double mappedX = (event.getX() - offsetX) / scale;
+            double mappedY = (event.getY() - offsetY) / scale;
+
+            if (mappedX >= 0 && mappedX <= 800 && mappedY >= 0 && mappedY <= 600) {
+                currentRenderer.registerClick((int) mappedX, (int) mappedY);
+            }
+
+            lastMouseX = event.getX();
+            lastMouseY = event.getY();
+        });
+
+        imageView.setOnMouseDragged(event -> {
+            double deltaX = event.getX() - lastMouseX;
+            double deltaY = event.getY() - lastMouseY;
+
+            if (currentRenderer.getSelectedObjectId() != -1) {
+                if (event.isPrimaryButtonDown()) {
+                    currentRenderer.rotateSelectedObject((float) deltaX, (float) deltaY);
+                } else if (event.isSecondaryButtonDown()) {
+                    currentRenderer.moveSelectedObject((float) deltaX, (float) deltaY);
+                }
+            }
+
+            lastMouseX = event.getX();
+            lastMouseY = event.getY();
+        });
+
+        imageView.setOnScroll(event -> {
+            if (currentRenderer != null && currentRenderer.getSelectedObjectId() != -1) {
+                currentRenderer.scaleSelectedObject((float) event.getDeltaY() * 0.005f);
+            }
+        });
+
+        renderThread = new Thread(currentRenderer);
         renderThread.setDaemon(true);
         renderThread.start();
+
+        currentRenderer.queueModelLoad(modelPath);
     }
     private void setUpCameraMovement(OpenGLRenderer renderer)
     {
