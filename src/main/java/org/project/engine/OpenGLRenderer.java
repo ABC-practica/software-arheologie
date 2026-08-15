@@ -127,8 +127,7 @@ public class OpenGLRenderer implements Runnable
                     try
                     {
                         Mesh mesh = ModelLoader.loadModel(newModelPath);
-                        SceneObject newPiece = new SceneObject(nextObjectId++, mesh);
-                        newPiece.rotation.x = (float) Math.toRadians(-90.0f);
+                        SceneObject newPiece = new SceneObject(nextObjectId++, mesh, newModelPath);
                         objects.add(newPiece);
                         System.out.println("Obiect incarcat cu succes! ID: " + newPiece.getId());
                     }

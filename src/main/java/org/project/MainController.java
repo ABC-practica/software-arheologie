@@ -2,10 +2,10 @@ package org.project;
 
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
-import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.Label;
+import javafx.scene.control.Slider;
 import javafx.scene.image.ImageView;
 import javafx.scene.image.WritableImage;
 import javafx.scene.layout.StackPane;
@@ -16,6 +16,8 @@ import javafx.stage.Stage;
 import org.project.engine.*;
 
 import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
 
 public class MainController
 {
@@ -31,6 +33,7 @@ public class MainController
     private double lastClickScreenX = 0;
     private double lastClickScreenY = 0;
     private final Popup selectionPopup = new Popup();
+    private final Map<Integer, Stage> openObjectWindows = new HashMap<>();
 
     @FXML
     private void handleFileUpload(ActionEvent event)
@@ -132,8 +135,8 @@ public class MainController
             return;
         }
 
-        Label label = new Label("Obiect #" + objectId);
-        Button openWindowButton = new Button("Deschide fereastră nouă");
+        Label label = new Label("Object #" + objectId);
+        Button openWindowButton = new Button("Open dedicate window");
         openWindowButton.setOnAction(e -> openObjectWindow(objectId));
 
         VBox content = new VBox(8, label, openWindowButton);
@@ -148,13 +151,78 @@ public class MainController
 
     private void openObjectWindow(int objectId)
     {
-        Label placeholder = new Label("Randare individuală pentru obiectul #" + objectId + " — urmează.");
-        VBox root = new VBox(placeholder);
-        root.setAlignment(Pos.CENTER);
+        Stage existing = openObjectWindows.get(objectId);
+        if (existing != null)
+        {
+            existing.toFront();
+            existing.requestFocus();
+            return;
+        }
+
+        SceneObject target = null;
+        for (SceneObject obj : currentRenderer.objects)
+        {
+            if (obj.getId() == objectId)
+            {
+                target = obj;
+                break;
+            }
+        }
+        if (target == null) return;
+
+        int viewSize = 500;
+        WritableImage frameBufferImage = new WritableImage(viewSize, viewSize);
+        ImageView imageView = new ImageView(frameBufferImage);
+        imageView.setFitWidth(viewSize);
+        imageView.setFitHeight(viewSize);
+        imageView.setPreserveRatio(true);
+
+        SingleObjectRenderer objectRenderer = new SingleObjectRenderer(target.getSourcePath(), frameBufferImage, viewSize, viewSize);
+
+        double[] lastX = {0};
+        double[] lastY = {0};
+        imageView.setOnMousePressed(event -> {
+            lastX[0] = event.getX();
+            lastY[0] = event.getY();
+        });
+        imageView.setOnMouseDragged(event -> {
+            objectRenderer.rotate((float) (event.getX() - lastX[0]), (float) (event.getY() - lastY[0]));
+            lastX[0] = event.getX();
+            lastY[0] = event.getY();
+        });
+        imageView.setOnScroll(event -> objectRenderer.scale((float) event.getDeltaY() * 0.005f));
+
+        Slider angleSlider = new Slider(0, 180, 0);
+        Slider offsetSlider = new Slider(-2.5, 2.5, 0);
+        angleSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setPlaneAngle((float) Math.toRadians(newVal.doubleValue())));
+        offsetSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setPlaneOffset(newVal.floatValue()));
+
+        Button computeButton = new Button("Calculează curbura");
+        computeButton.setOnAction(e -> objectRenderer.requestComputeCurvature());
+
+        VBox controls = new VBox(6,
+                new Label("Unghi plan"), angleSlider,
+                new Label("Poziție plan"), offsetSlider,
+                computeButton);
+        controls.setStyle("-fx-padding: 10;");
+
+        VBox root = new VBox(imageView, controls);
+
+        Thread objectRenderThread = new Thread(objectRenderer);
+        objectRenderThread.setDaemon(true);
+        objectRenderThread.start();
 
         Stage objectStage = new Stage();
         objectStage.setTitle("Obiect #" + objectId);
-        objectStage.setScene(new Scene(root, 400, 300));
+        objectStage.setScene(new Scene(root, viewSize, viewSize + 160));
+        objectStage.setOnCloseRequest(e -> {
+            objectRenderThread.interrupt();
+            openObjectWindows.remove(objectId);
+        });
         objectStage.show();
+
+        openObjectWindows.put(objectId, objectStage);
     }
 }
