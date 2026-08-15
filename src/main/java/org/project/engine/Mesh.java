@@ -14,10 +14,14 @@ public class Mesh
     private final int uvVboId;
     private final int eboId;
     private final List<MeshPart> parts;
+    private final float[] positions;
+    private final int[] indices;
 
     public Mesh(float[] positions, float[] normals, float[] texCoords, int[] indices, List<MeshPart> parts)
     {
         this.parts = parts;
+        this.positions = positions;
+        this.indices = indices;
 
         FloatBuffer posBuffer = MemoryUtil.memAllocFloat(positions.length);
         posBuffer.put(positions).flip();
@@ -63,6 +67,16 @@ public class Mesh
         MemoryUtil.memFree(normalBuffer);
         MemoryUtil.memFree(uvBuffer);
         MemoryUtil.memFree(indicesBuffer);
+    }
+
+    public float[] getPositions()
+    {
+        return positions;
+    }
+
+    public int[] getIndices()
+    {
+        return indices;
     }
 
     public void render()

@@ -2,14 +2,22 @@ package org.project;
 
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.Slider;
 import javafx.scene.image.ImageView;
 import javafx.scene.image.WritableImage;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
+import javafx.stage.Popup;
 import javafx.stage.Stage;
 import org.project.engine.*;
 
 import java.io.File;
+import java.util.HashMap;
+import java.util.Map;
 
 public class MainController
 {
@@ -22,6 +30,10 @@ public class MainController
     private int nextObjectId = 1;
     private double lastMouseX = 0;
     private double lastMouseY = 0;
+    private double lastClickScreenX = 0;
+    private double lastClickScreenY = 0;
+    private final Popup selectionPopup = new Popup();
+    private final Map<Integer, Stage> openObjectWindows = new HashMap<>();
 
     @FXML
     private void handleFileUpload(ActionEvent event)
@@ -60,6 +72,7 @@ public class MainController
         canvasPlaceholder.getChildren().add(imageView);
 
         currentRenderer = new OpenGLRenderer(frameBufferImage);
+        currentRenderer.setOnSelectionChanged(this::onSelectionChanged);
 
         imageView.setOnMousePressed(event -> {
             double viewW = imageView.getLayoutBounds().getWidth();
@@ -76,6 +89,8 @@ public class MainController
             double mappedY = (event.getY() - offsetY) / scale;
 
             if (mappedX >= 0 && mappedX <= 800 && mappedY >= 0 && mappedY <= 600) {
+                lastClickScreenX = event.getScreenX();
+                lastClickScreenY = event.getScreenY();
                 currentRenderer.registerClick((int) mappedX, (int) mappedY);
             }
 
@@ -110,5 +125,130 @@ public class MainController
         renderThread.start();
 
         currentRenderer.queueModelLoad(modelPath);
+    }
+
+    private void onSelectionChanged(int objectId)
+    {
+        if (objectId == -1)
+        {
+            selectionPopup.hide();
+            return;
+        }
+
+        Label label = new Label("Object #" + objectId);
+        Button openWindowButton = new Button("Open dedicate window");
+        openWindowButton.setOnAction(e -> openObjectWindow(objectId));
+
+        VBox content = new VBox(8, label, openWindowButton);
+        content.setStyle("-fx-background-color: #2b2b2b; -fx-padding: 10; -fx-border-color: #555; -fx-border-width: 1;");
+        label.setStyle("-fx-text-fill: white;");
+
+        selectionPopup.getContent().setAll(content);
+
+        Stage ownerWindow = (Stage) canvasPlaceholder.getScene().getWindow();
+        selectionPopup.show(ownerWindow, lastClickScreenX, lastClickScreenY);
+    }
+
+    private void openObjectWindow(int objectId)
+    {
+        Stage existing = openObjectWindows.get(objectId);
+        if (existing != null)
+        {
+            existing.toFront();
+            existing.requestFocus();
+            return;
+        }
+
+        SceneObject target = null;
+        for (SceneObject obj : currentRenderer.objects)
+        {
+            if (obj.getId() == objectId)
+            {
+                target = obj;
+                break;
+            }
+        }
+        if (target == null) return;
+
+        int viewSize = 500;
+        WritableImage frameBufferImage = new WritableImage(viewSize, viewSize);
+        ImageView imageView = new ImageView(frameBufferImage);
+        imageView.setFitWidth(viewSize);
+        imageView.setFitHeight(viewSize);
+        imageView.setPreserveRatio(true);
+
+        SingleObjectRenderer objectRenderer = new SingleObjectRenderer(target.getSourcePath(), frameBufferImage, viewSize, viewSize);
+
+        double[] lastX = {0};
+        double[] lastY = {0};
+        imageView.setOnMousePressed(event -> {
+            lastX[0] = event.getX();
+            lastY[0] = event.getY();
+        });
+        imageView.setOnMouseDragged(event -> {
+            objectRenderer.rotate((float) (event.getX() - lastX[0]), (float) (event.getY() - lastY[0]));
+            lastX[0] = event.getX();
+            lastY[0] = event.getY();
+        });
+        imageView.setOnScroll(event -> objectRenderer.scale((float) event.getDeltaY() * 0.005f));
+
+        Button computeButton = new Button("Calculează curbura");
+        computeButton.setOnAction(e -> objectRenderer.requestComputeCurvature());
+
+        Label equationsLabel = new Label("Apasă \"Calculează curbura\" pentru rezultat.");
+        equationsLabel.setStyle("-fx-font-family: monospace;");
+        objectRenderer.setOnCurvatureComputed(result -> equationsLabel.setText(String.format(
+                "Exterior: %.2fx + %.2fy + %.2fz + %.2f = 0%nInterior: %.2fx + %.2fy + %.2fz + %.2f = 0",
+                result.exteriorPlaneNormal.x, result.exteriorPlaneNormal.y, result.exteriorPlaneNormal.z,
+                -result.exteriorPlaneNormal.dot(result.exteriorPlanePoint),
+                result.interiorPlaneNormal.x, result.interiorPlaneNormal.y, result.interiorPlaneNormal.z,
+                -result.interiorPlaneNormal.dot(result.interiorPlanePoint))));
+
+        Slider yawSlider = new Slider(0, 360, 0);
+        Slider pitchSlider = new Slider(-89, 89, 0);
+        Slider offsetSlider = new Slider(-2.5, 2.5, 0);
+        Slider thicknessSlider = new Slider(0, 1.5, 0.2);
+        objectRenderer.setCrossSectionThickness(0.2f);
+        yawSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setCrossSectionYaw((float) Math.toRadians(newVal.doubleValue())));
+        pitchSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setCrossSectionPitch((float) Math.toRadians(newVal.doubleValue())));
+        offsetSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setCrossSectionOffset(newVal.floatValue()));
+        thicknessSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setCrossSectionThickness(newVal.floatValue()));
+
+        Button cutButton = new Button("Decupează secțiune");
+        cutButton.setOnAction(e -> objectRenderer.requestComputeCrossSection());
+
+        VBox curvatureControls = new VBox(6, computeButton, equationsLabel);
+        curvatureControls.setStyle("-fx-padding: 10;");
+
+        VBox crossSectionControls = new VBox(6,
+                new Label("Secțiune 2D — unghi orizontal"), yawSlider,
+                new Label("Unghi vertical"), pitchSlider,
+                new Label("Poziție plan"), offsetSlider,
+                new Label("Grosime plan"), thicknessSlider,
+                cutButton);
+        crossSectionControls.setStyle("-fx-padding: 10;");
+
+        VBox controls = new VBox(10, curvatureControls, crossSectionControls);
+
+        VBox root = new VBox(imageView, controls);
+
+        Thread objectRenderThread = new Thread(objectRenderer);
+        objectRenderThread.setDaemon(true);
+        objectRenderThread.start();
+
+        Stage objectStage = new Stage();
+        objectStage.setTitle("Obiect #" + objectId);
+        objectStage.setScene(new Scene(root, viewSize, viewSize + 420));
+        objectStage.setOnCloseRequest(e -> {
+            objectRenderThread.interrupt();
+            openObjectWindows.remove(objectId);
+        });
+        objectStage.show();
+
+        openObjectWindows.put(objectId, objectStage);
     }
 }

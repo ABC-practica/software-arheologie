@@ -4,6 +4,7 @@ import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.system.MemoryStack;
 import org.joml.Vector3f;
+import org.joml.Vector4f;
 
 import java.nio.FloatBuffer;
 
@@ -18,7 +19,7 @@ public class ShaderProgram
         programId = GL30.glCreateProgram();
         if (programId == 0)
         {
-            throw new Exception("Nu s-a putut crea programul de shadere!");
+            throw new Exception("Could not load shaders!");
         }
     }
 
@@ -35,12 +36,12 @@ public class ShaderProgram
     private int createShader(String shaderCode, int shaderType) throws Exception
     {
         int shaderId = GL30.glCreateShader(shaderType);
-        if (shaderId == 0) throw new Exception("Eroare la crearea shaderului!");
+        if (shaderId == 0) throw new Exception("Error at shader creation");
         GL30.glShaderSource(shaderId, shaderCode);
         GL30.glCompileShader(shaderId);
         if (GL30.glGetShaderi(shaderId, GL30.GL_COMPILE_STATUS) == 0)
         {
-            throw new Exception("Eroare la compilarea shaderului: " + GL30.glGetShaderInfoLog(shaderId, 1024));
+            throw new Exception("Error at shader compile: " + GL30.glGetShaderInfoLog(shaderId, 1024));
         }
         GL30.glAttachShader(programId, shaderId);
         return shaderId;
@@ -88,5 +89,11 @@ public class ShaderProgram
     {
         int uniformLocation = GL30.glGetUniformLocation(programId, uniformName);
         GL30.glUniform3f(uniformLocation, value.x, value.y, value.z);
+    }
+
+    public void setUniform(String uniformName, Vector4f value)
+    {
+        int uniformLocation = GL30.glGetUniformLocation(programId, uniformName);
+        GL30.glUniform4f(uniformLocation, value.x, value.y, value.z, value.w);
     }
 }
