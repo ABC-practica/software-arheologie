@@ -10,32 +10,23 @@ public class Mesh
 {
     private final int vaoId;
     private final int vboId;
-    private final int uvVboId;
     private final int normalVboId;
-    private final int texVboId;
+    private final int uvVboId;
     private final int eboId;
     private final List<MeshPart> parts;
 
-    public Mesh(float[] positions, float[] texCoords, int[] indices, List<MeshPart> parts)
+    public Mesh(float[] positions, float[] normals, float[] texCoords, int[] indices, List<MeshPart> parts)
     {
         this.parts = parts;
+
         FloatBuffer posBuffer = MemoryUtil.memAllocFloat(positions.length);
         posBuffer.put(positions).flip();
+
+        FloatBuffer normalBuffer = MemoryUtil.memAllocFloat(normals.length);
+        normalBuffer.put(normals).flip();
 
         FloatBuffer uvBuffer = MemoryUtil.memAllocFloat(texCoords.length);
         uvBuffer.put(texCoords).flip();
-    public Mesh(float[] positions, float[] normals, float[] texCoords, int[] indices)
-    {
-        this.vertexCount = indices.length;
-
-        FloatBuffer posBuffer = MemoryUtil.memAllocFloat(positions.length);
-        posBuffer.put(positions).flip();
-
-        FloatBuffer normBuffer = MemoryUtil.memAllocFloat(normals.length);
-        normBuffer.put(normals).flip();
-
-        FloatBuffer texBuffer = MemoryUtil.memAllocFloat(texCoords.length);
-        texBuffer.put(texCoords).flip();
 
         IntBuffer indicesBuffer = MemoryUtil.memAllocInt(indices.length);
         indicesBuffer.put(indices).flip();
@@ -49,21 +40,15 @@ public class Mesh
         GL30.glVertexAttribPointer(0, 3, GL30.GL_FLOAT, false, 0, 0);
         GL30.glEnableVertexAttribArray(0);
 
-        uvVboId = GL30.glGenBuffers();
-        GL30.glBindBuffer(GL30.GL_ARRAY_BUFFER, uvVboId);
-        GL30.glBufferData(GL30.GL_ARRAY_BUFFER, uvBuffer, GL30.GL_STATIC_DRAW);
-        GL30.glVertexAttribPointer(1, 2, GL30.GL_FLOAT, false, 0, 0);
-        GL30.glEnableVertexAttribArray(1);
-
         normalVboId = GL30.glGenBuffers();
         GL30.glBindBuffer(GL30.GL_ARRAY_BUFFER, normalVboId);
-        GL30.glBufferData(GL30.GL_ARRAY_BUFFER, normBuffer, GL30.GL_STATIC_DRAW);
+        GL30.glBufferData(GL30.GL_ARRAY_BUFFER, normalBuffer, GL30.GL_STATIC_DRAW);
         GL30.glVertexAttribPointer(1, 3, GL30.GL_FLOAT, false, 0, 0);
         GL30.glEnableVertexAttribArray(1);
 
-        texVboId = GL30.glGenBuffers();
-        GL30.glBindBuffer(GL30.GL_ARRAY_BUFFER, texVboId);
-        GL30.glBufferData(GL30.GL_ARRAY_BUFFER, texBuffer, GL30.GL_STATIC_DRAW);
+        uvVboId = GL30.glGenBuffers();
+        GL30.glBindBuffer(GL30.GL_ARRAY_BUFFER, uvVboId);
+        GL30.glBufferData(GL30.GL_ARRAY_BUFFER, uvBuffer, GL30.GL_STATIC_DRAW);
         GL30.glVertexAttribPointer(2, 2, GL30.GL_FLOAT, false, 0, 0);
         GL30.glEnableVertexAttribArray(2);
 
@@ -75,9 +60,8 @@ public class Mesh
         GL30.glBindVertexArray(0);
 
         MemoryUtil.memFree(posBuffer);
+        MemoryUtil.memFree(normalBuffer);
         MemoryUtil.memFree(uvBuffer);
-        MemoryUtil.memFree(normBuffer);
-        MemoryUtil.memFree(texBuffer);
         MemoryUtil.memFree(indicesBuffer);
     }
 

@@ -120,8 +120,7 @@ public class OpenGLRenderer implements Runnable
                     try
                     {
                         Mesh mesh = ModelLoader.loadModel(newModelPath);
-                        Texture defaultTexture = new Texture();
-                        SceneObject newPiece = new SceneObject(nextObjectId++, mesh, defaultTexture);
+                        SceneObject newPiece = new SceneObject(nextObjectId++, mesh);
                         newPiece.rotation.x = (float) Math.toRadians(-90.0f);
                         objects.add(newPiece);
                         System.out.println("Obiect incarcat cu succes! ID: " + newPiece.getId());
@@ -146,7 +145,6 @@ public class OpenGLRenderer implements Runnable
                     int isSelected = (obj.getId() == selectedObjectId) ? 1 : 0;
                     shader.setUniform("isSelected", isSelected);
 
-                    obj.getTexture().bind();
                     obj.getMesh().render();
                 }
                 if (mouseClicked) {
