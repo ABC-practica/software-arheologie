@@ -1,4 +1,6 @@
 #version 330 core
+in vec2 TexCoord;
+out vec4 FragColor;
 in vec3 Normal;
 in vec3 FragPos;
 in vec2 TexCoords;
@@ -10,8 +12,11 @@ uniform sampler2D texture1;
 uniform vec3 objectIdColor;
 uniform int isSelected;
 
+uniform sampler2D texture1;
+
 void main()
 {
+    FragColor = texture(texture1, TexCoord);
     vec3 lightDir = normalize(vec3(0.2, 0.8, 1.0));
 
     vec3 norm = normalize(Normal);

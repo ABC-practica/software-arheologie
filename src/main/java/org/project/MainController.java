@@ -111,4 +111,8 @@ public class MainController
 
         currentRenderer.queueModelLoad(modelPath);
     }
+    private void setUpCameraMovement(OpenGLRenderer renderer)
+    {
+
+    }
 }

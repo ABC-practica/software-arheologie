@@ -78,6 +78,9 @@ public class ShaderProgram
         }
     }
 
+    public void setUniform(String uniformName, int value)
+    {
+        int uniformLocation = GL30.glGetUniformLocation(programId, uniformName);
     public void setUniform(String uniformName, Vector3f value)
     {
         int uniformLocation = GL30.glGetUniformLocation(programId, uniformName);
