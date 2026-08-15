@@ -2,10 +2,16 @@ package org.project;
 
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
+import javafx.geometry.Pos;
+import javafx.scene.Scene;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
 import javafx.scene.image.ImageView;
 import javafx.scene.image.WritableImage;
 import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
+import javafx.stage.Popup;
 import javafx.stage.Stage;
 import org.project.engine.*;
 
@@ -22,6 +28,9 @@ public class MainController
     private int nextObjectId = 1;
     private double lastMouseX = 0;
     private double lastMouseY = 0;
+    private double lastClickScreenX = 0;
+    private double lastClickScreenY = 0;
+    private final Popup selectionPopup = new Popup();
 
     @FXML
     private void handleFileUpload(ActionEvent event)
@@ -60,6 +69,7 @@ public class MainController
         canvasPlaceholder.getChildren().add(imageView);
 
         currentRenderer = new OpenGLRenderer(frameBufferImage);
+        currentRenderer.setOnSelectionChanged(this::onSelectionChanged);
 
         imageView.setOnMousePressed(event -> {
             double viewW = imageView.getLayoutBounds().getWidth();
@@ -76,6 +86,8 @@ public class MainController
             double mappedY = (event.getY() - offsetY) / scale;
 
             if (mappedX >= 0 && mappedX <= 800 && mappedY >= 0 && mappedY <= 600) {
+                lastClickScreenX = event.getScreenX();
+                lastClickScreenY = event.getScreenY();
                 currentRenderer.registerClick((int) mappedX, (int) mappedY);
             }
 
@@ -110,5 +122,39 @@ public class MainController
         renderThread.start();
 
         currentRenderer.queueModelLoad(modelPath);
+    }
+
+    private void onSelectionChanged(int objectId)
+    {
+        if (objectId == -1)
+        {
+            selectionPopup.hide();
+            return;
+        }
+
+        Label label = new Label("Obiect #" + objectId);
+        Button openWindowButton = new Button("Deschide fereastră nouă");
+        openWindowButton.setOnAction(e -> openObjectWindow(objectId));
+
+        VBox content = new VBox(8, label, openWindowButton);
+        content.setStyle("-fx-background-color: #2b2b2b; -fx-padding: 10; -fx-border-color: #555; -fx-border-width: 1;");
+        label.setStyle("-fx-text-fill: white;");
+
+        selectionPopup.getContent().setAll(content);
+
+        Stage ownerWindow = (Stage) canvasPlaceholder.getScene().getWindow();
+        selectionPopup.show(ownerWindow, lastClickScreenX, lastClickScreenY);
+    }
+
+    private void openObjectWindow(int objectId)
+    {
+        Label placeholder = new Label("Randare individuală pentru obiectul #" + objectId + " — urmează.");
+        VBox root = new VBox(placeholder);
+        root.setAlignment(Pos.CENTER);
+
+        Stage objectStage = new Stage();
+        objectStage.setTitle("Obiect #" + objectId);
+        objectStage.setScene(new Scene(root, 400, 300));
+        objectStage.show();
     }
 }

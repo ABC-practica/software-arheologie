@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.IntConsumer;
 
 public class OpenGLRenderer implements Runnable
 {
@@ -37,6 +38,7 @@ public class OpenGLRenderer implements Runnable
     private volatile int clickX = 0;
     private volatile int clickY = 0;
     private volatile int selectedObjectId = -1;
+    private IntConsumer onSelectionChanged;
 
     public OpenGLRenderer(WritableImage fxImage)
     {
@@ -53,6 +55,11 @@ public class OpenGLRenderer implements Runnable
     public int getSelectedObjectId()
     {
         return selectedObjectId;
+    }
+
+    public void setOnSelectionChanged(IntConsumer callback)
+    {
+        this.onSelectionChanged = callback;
     }
 
     @Override
@@ -159,9 +166,14 @@ public class OpenGLRenderer implements Runnable
 
                     int newSelection = (pickedId == 0 || pickedId == 2697513) ? -1 : pickedId;
 
-                    if (newSelection != -1) {
+                    if (newSelection != selectedObjectId) {
                         selectedObjectId = newSelection;
                         System.out.println("Ciob selectat cu ID: " + selectedObjectId);
+                        if (onSelectionChanged != null)
+                        {
+                            int notifiedId = selectedObjectId;
+                            Platform.runLater(() -> onSelectionChanged.accept(notifiedId));
+                        }
                     }
 
                     GL30.glReadBuffer(GL30.GL_COLOR_ATTACHMENT0);
