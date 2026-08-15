@@ -61,8 +61,4 @@ public class MainController
         renderThread.setDaemon(true);
         renderThread.start();
     }
-    private void setUpCameraMovement(OpenGLRenderer renderer)
-    {
-
-    }
 }
