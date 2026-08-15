@@ -7,17 +7,15 @@ public class SceneObject
 {
     private final int id;
     private final Mesh mesh;
-    private final Texture texture;
 
     public Vector3f position = new Vector3f(0, 0, 0);
     public Vector3f rotation = new Vector3f(0, 0, 0);
     public float scale = 1.0f;
 
-    public SceneObject(int id, Mesh mesh, Texture texture)
+    public SceneObject(int id, Mesh mesh)
     {
         this.id = id;
         this.mesh = mesh;
-        this.texture = texture;
     }
 
     public int getId()
@@ -28,11 +26,6 @@ public class SceneObject
     public Mesh getMesh()
     {
         return mesh;
-    }
-
-    public Texture getTexture()
-    {
-        return texture;
     }
 
     public Vector3f getPickingColor()

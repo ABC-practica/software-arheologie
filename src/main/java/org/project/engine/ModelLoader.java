@@ -1,8 +1,13 @@
 package org.project.engine;
 
+import org.joml.Matrix3f;
+import org.joml.Matrix4f;
+import org.joml.Vector3f;
 import org.lwjgl.assimp.AIFace;
 import org.lwjgl.assimp.AIMaterial;
+import org.lwjgl.assimp.AIMatrix4x4;
 import org.lwjgl.assimp.AIMesh;
+import org.lwjgl.assimp.AINode;
 import org.lwjgl.assimp.AIScene;
 import org.lwjgl.assimp.AIString;
 import org.lwjgl.assimp.AITexture;
@@ -20,16 +25,18 @@ public class ModelLoader
 {
     public static Mesh loadModel(String filePath)
     {
-        AIScene scene = Assimp.aiImportFile(filePath, Assimp.aiProcess_Triangulate | Assimp.aiProcess_JoinIdenticalVertices | Assimp.aiProcess_FlipUVs);
         AIScene scene = Assimp.aiImportFile(filePath,
-                Assimp.aiProcess_Triangulate |
-                        Assimp.aiProcess_JoinIdenticalVertices |
-                        Assimp.aiProcess_GenSmoothNormals);
-
+                Assimp.aiProcess_Triangulate
+                        | Assimp.aiProcess_JoinIdenticalVertices
+                        | Assimp.aiProcess_FlipUVs
+                        | Assimp.aiProcess_GenSmoothNormals);
         if (scene == null || scene.mRootNode() == null)
         {
             throw new RuntimeException("Eroare la incarcarea modelului: " + Assimp.aiGetErrorString());
         }
+
+        Map<Integer, Matrix4f> meshWorldTransforms = new HashMap<>();
+        collectMeshTransforms(scene.mRootNode(), new Matrix4f(), meshWorldTransforms);
 
         int numMeshes = scene.mNumMeshes();
         int totalVertices = 0;
@@ -42,15 +49,10 @@ public class ModelLoader
         }
 
         float[] vertices = new float[totalVertices * 3];
+        float[] normals = new float[totalVertices * 3];
         float[] texCoords = new float[totalVertices * 2];
         int[] indices = new int[totalIndices];
         List<MeshPart> parts = new ArrayList<>();
-        AIMesh aiMesh = AIMesh.create(scene.mMeshes().get(0));
-
-        int vertexCount = aiMesh.mNumVertices();
-        float[] vertices = new float[vertexCount * 3];
-        float[] normals = new float[vertexCount * 3];
-        float[] texCoords = new float[vertexCount * 2];
 
         float minX=Float.MAX_VALUE, minY=Float.MAX_VALUE, minZ=Float.MAX_VALUE;
         float maxX=-Float.MAX_VALUE, maxY=-Float.MAX_VALUE, maxZ=-Float.MAX_VALUE;
@@ -64,15 +66,31 @@ public class ModelLoader
             AIVector3D.Buffer aiTexCoords = aiMesh.mTextureCoords(0);
             int baseVertex = vertexCursor;
 
+            Matrix4f worldTransform = meshWorldTransforms.getOrDefault(m, new Matrix4f());
+            Matrix3f normalMatrix = new Matrix3f();
+            worldTransform.normal(normalMatrix);
+
+            Vector3f posOut = new Vector3f();
+            Vector3f normalOut = new Vector3f();
+
             for (int i = 0; i < aiMesh.mNumVertices(); i++) {
-                float x = aiMesh.mVertices().get(i).x();
-                float y = aiMesh.mVertices().get(i).y();
-                float z = aiMesh.mVertices().get(i).z();
+                AIVector3D localPos = aiMesh.mVertices().get(i);
+                worldTransform.transformPosition(localPos.x(), localPos.y(), localPos.z(), posOut);
 
                 int vi = baseVertex + i;
-                vertices[vi * 3] = x;
-                vertices[vi * 3 + 1] = y;
-                vertices[vi * 3 + 2] = z;
+                vertices[vi * 3] = posOut.x;
+                vertices[vi * 3 + 1] = posOut.y;
+                vertices[vi * 3 + 2] = posOut.z;
+
+                if (aiMesh.mNormals() != null)
+                {
+                    AIVector3D localNormal = aiMesh.mNormals().get(i);
+                    normalMatrix.transform(localNormal.x(), localNormal.y(), localNormal.z(), normalOut);
+                    normalOut.normalize();
+                    normals[vi * 3] = normalOut.x;
+                    normals[vi * 3 + 1] = normalOut.y;
+                    normals[vi * 3 + 2] = normalOut.z;
+                }
 
                 if (aiTexCoords != null)
                 {
@@ -81,12 +99,12 @@ public class ModelLoader
                     texCoords[vi * 2 + 1] = uv.y();
                 }
 
-                if (x < minX) minX = x;
-                if (y < minY) minY = y;
-                if (z < minZ) minZ = z;
-                if (x > maxX) maxX = x;
-                if (y > maxY) maxY = y;
-                if (z > maxZ) maxZ = z;
+                if (posOut.x < minX) minX = posOut.x;
+                if (posOut.y < minY) minY = posOut.y;
+                if (posOut.z < minZ) minZ = posOut.z;
+                if (posOut.x > maxX) maxX = posOut.x;
+                if (posOut.y > maxY) maxY = posOut.y;
+                if (posOut.z > maxZ) maxZ = posOut.z;
             }
 
             int faceCount = aiMesh.mNumFaces();
@@ -103,35 +121,6 @@ public class ModelLoader
 
             vertexCursor += aiMesh.mNumVertices();
             indexCursor += faceCount * 3;
-        for (int i = 0; i < vertexCount; i++)
-        {
-            float x = aiMesh.mVertices().get(i).x();
-            float y = aiMesh.mVertices().get(i).y();
-            float z = aiMesh.mVertices().get(i).z();
-
-            vertices[i * 3] = x;
-            vertices[i * 3 + 1] = y;
-            vertices[i * 3 + 2] = z;
-
-            if (aiMesh.mNormals() != null)
-            {
-                normals[i * 3] = aiMesh.mNormals().get(i).x();
-                normals[i * 3 + 1] = aiMesh.mNormals().get(i).y();
-                normals[i * 3 + 2] = aiMesh.mNormals().get(i).z();
-            }
-
-            if (aiMesh.mTextureCoords(0) != null)
-            {
-                texCoords[i * 2] = aiMesh.mTextureCoords(0).get(i).x();
-                texCoords[i * 2 + 1] = aiMesh.mTextureCoords(0).get(i).y();
-            }
-
-            if (x < minX) minX = x;
-            if (y < minY) minY = y;
-            if (z < minZ) minZ = z;
-            if (x > maxX) maxX = x;
-            if (y > maxY) maxY = y;
-            if (z > maxZ) maxZ = z;
         }
 
         float centerX = (minX + maxX) / 2.0f;
@@ -146,14 +135,38 @@ public class ModelLoader
         float scale = 3.0f / (maxExtent == 0 ? 1 : maxExtent);
 
         for (int i = 0; i < totalVertices; i++) {
-        for (int i = 0; i < vertexCount; i++)
-        {
             vertices[i * 3]     = (vertices[i * 3] - centerX) * scale;
             vertices[i * 3 + 1] = (vertices[i * 3 + 1] - centerY) * scale;
             vertices[i * 3 + 2] = (vertices[i * 3 + 2] - centerZ) * scale;
         }
 
-        return new Mesh(vertices, texCoords, indices, parts);
+        return new Mesh(vertices, normals, texCoords, indices, parts);
+    }
+
+    private static void collectMeshTransforms(AINode node, Matrix4f parentTransform, Map<Integer, Matrix4f> out)
+    {
+        Matrix4f worldTransform = new Matrix4f(parentTransform).mul(toJoml(node.mTransformation()));
+
+        for (int i = 0; i < node.mNumMeshes(); i++)
+        {
+            out.put(node.mMeshes().get(i), worldTransform);
+        }
+
+        for (int i = 0; i < node.mNumChildren(); i++)
+        {
+            AINode child = AINode.create(node.mChildren().get(i));
+            collectMeshTransforms(child, worldTransform, out);
+        }
+    }
+
+    private static Matrix4f toJoml(AIMatrix4x4 m)
+    {
+        return new Matrix4f(
+                m.a1(), m.b1(), m.c1(), m.d1(),
+                m.a2(), m.b2(), m.c2(), m.d2(),
+                m.a3(), m.b3(), m.c3(), m.d3(),
+                m.a4(), m.b4(), m.c4(), m.d4()
+        );
     }
 
     private static int loadMaterialTexture(AIScene scene, AIMesh aiMesh, String modelFilePath)
@@ -198,15 +211,5 @@ public class ModelLoader
             System.err.println("Nu s-a putut incarca textura modelului, se foloseste una alba: " + e.getMessage());
             return Texture.createDefaultWhite();
         }
-        int[] indices = new int[aiMesh.mNumFaces() * 3];
-        for (int i = 0; i < aiMesh.mNumFaces(); i++)
-        {
-            AIFace face = aiMesh.mFaces().get(i);
-            indices[i * 3] = face.mIndices().get(0);
-            indices[i * 3 + 1] = face.mIndices().get(1);
-            indices[i * 3 + 2] = face.mIndices().get(2);
-        }
-
-        return new Mesh(vertices, normals, texCoords, indices);
     }
 }
