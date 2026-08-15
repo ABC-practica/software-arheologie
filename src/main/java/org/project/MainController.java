@@ -192,21 +192,47 @@ public class MainController
         });
         imageView.setOnScroll(event -> objectRenderer.scale((float) event.getDeltaY() * 0.005f));
 
-        Slider angleSlider = new Slider(0, 180, 0);
-        Slider offsetSlider = new Slider(-2.5, 2.5, 0);
-        angleSlider.valueProperty().addListener((obs, oldVal, newVal) ->
-                objectRenderer.setPlaneAngle((float) Math.toRadians(newVal.doubleValue())));
-        offsetSlider.valueProperty().addListener((obs, oldVal, newVal) ->
-                objectRenderer.setPlaneOffset(newVal.floatValue()));
-
         Button computeButton = new Button("Calculează curbura");
         computeButton.setOnAction(e -> objectRenderer.requestComputeCurvature());
 
-        VBox controls = new VBox(6,
-                new Label("Unghi plan"), angleSlider,
+        Label equationsLabel = new Label("Apasă \"Calculează curbura\" pentru rezultat.");
+        equationsLabel.setStyle("-fx-font-family: monospace;");
+        objectRenderer.setOnCurvatureComputed(result -> equationsLabel.setText(String.format(
+                "Exterior: %.2fx + %.2fy + %.2fz + %.2f = 0%nInterior: %.2fx + %.2fy + %.2fz + %.2f = 0",
+                result.exteriorPlaneNormal.x, result.exteriorPlaneNormal.y, result.exteriorPlaneNormal.z,
+                -result.exteriorPlaneNormal.dot(result.exteriorPlanePoint),
+                result.interiorPlaneNormal.x, result.interiorPlaneNormal.y, result.interiorPlaneNormal.z,
+                -result.interiorPlaneNormal.dot(result.interiorPlanePoint))));
+
+        Slider yawSlider = new Slider(0, 360, 0);
+        Slider pitchSlider = new Slider(-89, 89, 0);
+        Slider offsetSlider = new Slider(-2.5, 2.5, 0);
+        Slider thicknessSlider = new Slider(0, 1.5, 0.2);
+        objectRenderer.setCrossSectionThickness(0.2f);
+        yawSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setCrossSectionYaw((float) Math.toRadians(newVal.doubleValue())));
+        pitchSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setCrossSectionPitch((float) Math.toRadians(newVal.doubleValue())));
+        offsetSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setCrossSectionOffset(newVal.floatValue()));
+        thicknessSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setCrossSectionThickness(newVal.floatValue()));
+
+        Button cutButton = new Button("Decupează secțiune");
+        cutButton.setOnAction(e -> objectRenderer.requestComputeCrossSection());
+
+        VBox curvatureControls = new VBox(6, computeButton, equationsLabel);
+        curvatureControls.setStyle("-fx-padding: 10;");
+
+        VBox crossSectionControls = new VBox(6,
+                new Label("Secțiune 2D — unghi orizontal"), yawSlider,
+                new Label("Unghi vertical"), pitchSlider,
                 new Label("Poziție plan"), offsetSlider,
-                computeButton);
-        controls.setStyle("-fx-padding: 10;");
+                new Label("Grosime plan"), thicknessSlider,
+                cutButton);
+        crossSectionControls.setStyle("-fx-padding: 10;");
+
+        VBox controls = new VBox(10, curvatureControls, crossSectionControls);
 
         VBox root = new VBox(imageView, controls);
 
@@ -216,7 +242,7 @@ public class MainController
 
         Stage objectStage = new Stage();
         objectStage.setTitle("Obiect #" + objectId);
-        objectStage.setScene(new Scene(root, viewSize, viewSize + 160));
+        objectStage.setScene(new Scene(root, viewSize, viewSize + 420));
         objectStage.setOnCloseRequest(e -> {
             objectRenderThread.interrupt();
             openObjectWindows.remove(objectId);
