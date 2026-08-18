@@ -220,6 +220,13 @@ public class OpenGLRenderer implements Runnable
             if (obj.getId() == selectedObjectId) {
                 obj.position.x += deltaX * 0.01f;
                 obj.position.y += deltaY * 0.01f;
+
+                if (obj.position.x > 2.7f) obj.position.x = 2.7f;
+                if (obj.position.x < -2.7f) obj.position.x = -2.7f;
+
+                if (obj.position.y > 2.0f) obj.position.y = 2.0f;
+                if (obj.position.y < -2.0f) obj.position.y = -2.0f;
+
                 break;
             }
         }
