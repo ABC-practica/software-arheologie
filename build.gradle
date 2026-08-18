@@ -35,6 +35,9 @@ dependencies {
     runtimeOnly "org.lwjgl:lwjgl-stb::${lwjglNatives}"
 
     implementation "org.joml:joml:${jomlVersion}"
+
+    testImplementation platform('org.junit:junit-bom:5.10.2')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
 }
 
 javafx {
@@ -44,4 +47,8 @@ javafx {
 
 application {
     mainClass = 'org.project.Launcher'
+}
+
+test {
+    useJUnitPlatform()
 }
