@@ -24,6 +24,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 public class MainController
 {
@@ -140,7 +141,7 @@ public class MainController
             if (mappedX >= 0 && mappedX <= 800 && mappedY >= 0 && mappedY <= 600) {
                 lastClickScreenX = event.getScreenX();
                 lastClickScreenY = event.getScreenY();
-                currentRenderer.registerClick((int) mappedX, (int) mappedY);
+                currentRenderer.registerClick((int) mappedX, (int) mappedY, event.isControlDown());
             }
 
             lastMouseX = event.getX();
@@ -151,7 +152,7 @@ public class MainController
             double deltaX = event.getX() - lastMouseX;
             double deltaY = event.getY() - lastMouseY;
 
-            if (currentRenderer.getSelectedObjectId() != -1) {
+            if (currentRenderer != null && !currentRenderer.getSelectedObjectIds().isEmpty()) {
                 if (event.isPrimaryButtonDown()) {
                     currentRenderer.rotateSelectedObject((float) deltaX, (float) deltaY);
                 } else if (event.isSecondaryButtonDown()) {
@@ -164,7 +165,7 @@ public class MainController
         });
 
         imageView.setOnScroll(event -> {
-            if (currentRenderer != null && currentRenderer.getSelectedObjectId() != -1) {
+            if (currentRenderer != null && !currentRenderer.getSelectedObjectIds().isEmpty()) {
                 currentRenderer.scaleSelectedObject((float) event.getDeltaY() * 0.005f);
             }
         });
@@ -176,15 +177,18 @@ public class MainController
         currentRenderer.queueModelLoad(modelPath);
     }
 
-    private void onSelectionChanged(int objectId)
+    private void onSelectionChanged(Set<Integer> objectIds)
     {
-        if (objectId == -1)
+        if (objectIds.isEmpty())
         {
             selectionPopup.hide();
             return;
         }
 
-        Label label = new Label("Object #" + objectId);
+        VBox content = new VBox(8);
+        content.setStyle("-fx-background-color: #2b2b2b; -fx-padding: 10; -fx-border-color: #555; -fx-border-width: 1; -fx-border-radius: 3; -fx-background-radius: 3;");
+
+        Label label = new Label(objectIds.size() == 1 ? "Object #" + objectIds.iterator().next() : objectIds.size() + " Fragmente Selectate");
         label.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
         Button closeBtn = new Button("X");
         closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #aaaaaa; -fx-font-weight: bold; -fx-cursor: hand;");
@@ -197,32 +201,131 @@ public class MainController
         HBox header = new HBox(label, spacer, closeBtn);
         header.setAlignment(Pos.CENTER_LEFT);
         header.setPrefWidth(180);
+        content.getChildren().add(header);
+        if (objectIds.size() == 1) {
+            int singleId = objectIds.iterator().next();
 
-        Button openWindowButton = new Button("Open dedicated window");
-        openWindowButton.setMaxWidth(Double.MAX_VALUE);
-        openWindowButton.setOnAction(e -> {
-            selectionPopup.hide();
-            openObjectWindow(objectId);
-        });
+            Button openWindowButton = new Button("Open dedicated window");
+            openWindowButton.setMaxWidth(Double.MAX_VALUE);
+            openWindowButton.setOnAction(e -> {
+                selectionPopup.hide();
+                openObjectWindow(singleId);
+            });
 
-        Button deleteButton = new Button("Delete Object");
-        deleteButton.setMaxWidth(Double.MAX_VALUE);
-        deleteButton.setStyle("-fx-background-color: #d9534f; -fx-text-fill: white; -fx-cursor: hand;");
-        deleteButton.setOnAction(e -> {
-            selectionPopup.hide();
-            if (currentRenderer != null) {
-                currentRenderer.queueDeleteObject(objectId);
-            }
-            Stage dedicatedWindow = openObjectWindows.remove(objectId);
-            if (dedicatedWindow != null) {
-                dedicatedWindow.close();
-            }
-        });
-        VBox content = new VBox(8, header, openWindowButton, deleteButton);
-        content.setStyle("-fx-background-color: #2b2b2b; -fx-padding: 10; -fx-border-color: #555; -fx-border-width: 1; -fx-border-radius: 3; -fx-background-radius: 3;");
+            Button deleteButton = new Button("Delete Object");
+            deleteButton.setMaxWidth(Double.MAX_VALUE);
+            deleteButton.setStyle("-fx-background-color: #d9534f; -fx-text-fill: white; -fx-cursor: hand;");
+            deleteButton.setOnAction(e -> {
+                selectionPopup.hide();
+                if (currentRenderer != null) currentRenderer.queueDeleteObject(singleId);
+                Stage dedicatedWindow = openObjectWindows.remove(singleId);
+                if (dedicatedWindow != null) dedicatedWindow.close();
+            });
+
+            content.getChildren().addAll(openWindowButton, deleteButton);
+        }
+        else {
+            Button generateButton = new Button("Genereaza Vas");
+            generateButton.setStyle("-fx-background-color: #0078D7; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+            generateButton.setMaxWidth(Double.MAX_VALUE);
+            generateButton.setOnAction(e -> {
+                try {
+                    for (int id : objectIds) {
+                        if (!SessionDatabase.hasSection(id)) {
+                            throw new IllegalStateException("Fragmentul cu ID-ul #" + id + " nu are secțiunea definită!");
+                        }
+                    }
+                    selectionPopup.hide();
+                    simulateAIRestoration(objectIds);
+
+                } catch (IllegalStateException ex) {
+                    Alert alert = new Alert(Alert.AlertType.ERROR);
+                    alert.setTitle("Eroare de Validare");
+                    alert.setHeaderText("Acțiune respinsă: Secțiuni lipsă");
+                    alert.setContentText(ex.getMessage() + "\n\nTe rugăm să deschizi fereastra dedicată pentru acest obiect și să salvezi o secțiune.");
+                    alert.showAndWait();
+                }
+            });
+
+            Button deleteAllButton = new Button("Șterge Selecția");
+            deleteAllButton.setMaxWidth(Double.MAX_VALUE);
+            deleteAllButton.setStyle("-fx-background-color: #d9534f; -fx-text-fill: white; -fx-cursor: hand;");
+            deleteAllButton.setOnAction(e -> {
+                selectionPopup.hide();
+                if (currentRenderer != null) {
+                    for (int id : objectIds) {
+                        currentRenderer.queueDeleteObject(id);
+                        Stage dedicatedWindow = openObjectWindows.remove(id);
+                        if (dedicatedWindow != null) dedicatedWindow.close();
+                    }
+                }
+            });
+
+            content.getChildren().addAll(generateButton, deleteAllButton);
+        }
+
         selectionPopup.getContent().setAll(content);
         Stage ownerWindow = (Stage) canvasPlaceholder.getScene().getWindow();
         selectionPopup.show(ownerWindow, lastClickScreenX, lastClickScreenY);
+    }
+
+    private void simulateAIRestoration(Set<Integer> objectIds) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("Comunicare AI Backend");
+        alert.setHeaderText("Trimitere date către AI");
+        alert.setContentText("Datele extrase pentru cele " + objectIds.size() + " fragmente sunt corecte.\n\nSimulăm procesarea... Te rugăm să selectezi modelul 3D pe care l-ar fi generat AI-ul pentru a fi afișat.");
+        alert.showAndWait();
+
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Recepție Model AI - Alege Vaza Restaurată");
+        fileChooser.getExtensionFilters().addAll(
+                new FileChooser.ExtensionFilter("Modele 3D", "*.gltf", "*.glb", "*.obj")
+        );
+        Stage stage = (Stage) canvasPlaceholder.getScene().getWindow();
+        File selectedFile = fileChooser.showOpenDialog(stage);
+
+        if (selectedFile != null)
+        {
+            openRestoredVaseWindow(selectedFile.getAbsolutePath());
+        }
+    }
+
+    private void openRestoredVaseWindow(String modelPath) {
+        int viewSize = 600;
+        WritableImage frameBufferImage = new WritableImage(viewSize, viewSize);
+        ImageView imageView = new ImageView(frameBufferImage);
+        imageView.setFitWidth(viewSize);
+        imageView.setFitHeight(viewSize);
+        imageView.setPreserveRatio(true);
+
+        SingleObjectRenderer vaseRenderer = new SingleObjectRenderer(modelPath, frameBufferImage, viewSize, viewSize);
+        vaseRenderer.setCrossSectionThickness(0.0f);
+
+        double[] lastX = {0};
+        double[] lastY = {0};
+        imageView.setOnMousePressed(event -> {
+            lastX[0] = event.getX();
+            lastY[0] = event.getY();
+        });
+        imageView.setOnMouseDragged(event -> {
+            vaseRenderer.rotate((float) (event.getX() - lastX[0]), (float) (event.getY() - lastY[0]));
+            lastX[0] = event.getX();
+            lastY[0] = event.getY();
+        });
+        imageView.setOnScroll(event -> vaseRenderer.scale((float) event.getDeltaY() * 0.005f));
+
+        VBox root = new VBox(imageView);
+        root.setStyle("-fx-background-color: #2b2b2b;");
+
+        Thread renderThread = new Thread(vaseRenderer);
+        renderThread.setDaemon(true);
+        renderThread.start();
+
+        Stage vaseStage = new Stage();
+        vaseStage.setTitle("Rezultat Reconstrucție AI \u2728");
+        vaseStage.setScene(new Scene(root, viewSize, viewSize));
+        vaseStage.setOnCloseRequest(e -> renderThread.interrupt());
+        vaseStage.show();
     }
 
     private void openObjectWindow(int objectId)
@@ -254,6 +357,7 @@ public class MainController
         imageView.setPreserveRatio(true);
 
         SingleObjectRenderer objectRenderer = new SingleObjectRenderer(target.getSourcePath(), frameBufferImage, viewSize, viewSize);
+        objectRenderer.setOnTopViewCaptured(image -> openTopViewPreview(objectId, image));
 
         double[] lastX = {0};
         double[] lastY = {0};
@@ -272,16 +376,6 @@ public class MainController
         computeButton.setStyle("-fx-background-color: #0078D7; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
         computeButton.setMaxWidth(Double.MAX_VALUE);
         computeButton.setOnAction(e -> objectRenderer.requestComputeCurvature());
-
-        /*Label equationsLabel = new Label("Apasă \"Calculeaza curbura\" pentru rezultat.");
-        equationsLabel.setStyle("-fx-font-family: monospace; -fx-text-fill: #cccccc;");
-        equationsLabel.setWrapText(true);
-        objectRenderer.setOnCurvatureComputed(result -> equationsLabel.setText(String.format(
-                "Exterior: %.2fx + %.2fy + %.2fz + %.2f = 0%nInterior: %.2fx + %.2fy + %.2fz + %.2f = 0",
-                result.exteriorPlaneNormal.x, result.exteriorPlaneNormal.y, result.exteriorPlaneNormal.z,
-                -result.exteriorPlaneNormal.dot(result.exteriorPlanePoint),
-                result.interiorPlaneNormal.x, result.interiorPlaneNormal.y, result.interiorPlaneNormal.z,
-                -result.interiorPlaneNormal.dot(result.interiorPlanePoint))));*/
 
         Slider yawSlider = new Slider(0, 360, 0);
         Slider pitchSlider = new Slider(-89, 89, 0);
@@ -307,7 +401,7 @@ public class MainController
         Button captureTopViewButton = new Button("Vedere de sus a sectiunii");
         captureTopViewButton.setStyle("-fx-background-color: #6f42c1; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
         captureTopViewButton.setMaxWidth(Double.MAX_VALUE);
-        objectRenderer.setOnTopViewCaptured(this::openTopViewPreview);
+        objectRenderer.setOnTopViewCaptured(image -> openTopViewPreview(objectId, image));
         captureTopViewButton.setOnAction(e -> objectRenderer.requestTopViewCapture());
 
         Label l1 = new Label("Secțiune 2D — unghi orizontal"); l1.setStyle("-fx-text-fill: white;");
@@ -315,7 +409,6 @@ public class MainController
         Label l3 = new Label("Poziție plan"); l3.setStyle("-fx-text-fill: white;");
         Label l4 = new Label("Grosime plan"); l4.setStyle("-fx-text-fill: white;");
 
-        ///
         VBox curvatureControls = new VBox(8, computeButton);
         curvatureControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
@@ -361,7 +454,7 @@ public class MainController
         openObjectWindows.put(objectId, objectStage);
     }
 
-    private void openTopViewPreview(WritableImage image)
+    private void openTopViewPreview(int objectId, WritableImage image)
     {
         ImageView previewView = new ImageView(image);
         previewView.setFitWidth(400);
@@ -370,6 +463,14 @@ public class MainController
 
         Stage previewStage = new Stage();
         previewStage.setTitle("Previzualizare sectiune");
+
+        Button saveToDbButton = new Button("Salveaza Sectiunea pentru AI");
+        saveToDbButton.setStyle("-fx-background-color: #0078D7; -fx-text-fill: white; -fx-font-weight: bold;");
+        saveToDbButton.setOnAction(e -> {
+            SessionDatabase.saveSection(objectId, image);
+            System.out.println("Sectiune salvata in memorie pentru obiectul #" + objectId);
+            previewStage.close();
+        });
 
         Button saveButton = new Button("Salveaza pe disc");
         saveButton.setStyle("-fx-background-color: #28a745; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
@@ -397,7 +498,7 @@ public class MainController
         discardButton.setStyle("-fx-background-color: #d9534f; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
         discardButton.setOnAction(e -> previewStage.close());
 
-        HBox buttons = new HBox(10, saveButton, discardButton);
+        HBox buttons = new HBox(10, saveToDbButton, discardButton);
         buttons.setAlignment(Pos.CENTER);
         buttons.setStyle("-fx-padding: 10;");
 
