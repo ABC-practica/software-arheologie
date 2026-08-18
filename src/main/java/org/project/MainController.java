@@ -21,6 +21,7 @@ import javafx.stage.Screen;
 import javafx.geometry.Rectangle2D;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -303,6 +304,12 @@ public class MainController
         cutButton.setMaxWidth(Double.MAX_VALUE);
         cutButton.setOnAction(e -> objectRenderer.requestComputeCrossSection());
 
+        Button captureTopViewButton = new Button("Vedere de sus a sectiunii");
+        captureTopViewButton.setStyle("-fx-background-color: #6f42c1; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        captureTopViewButton.setMaxWidth(Double.MAX_VALUE);
+        objectRenderer.setOnTopViewCaptured(this::openTopViewPreview);
+        captureTopViewButton.setOnAction(e -> objectRenderer.requestTopViewCapture());
+
         Label l1 = new Label("Secțiune 2D — unghi orizontal"); l1.setStyle("-fx-text-fill: white;");
         Label l2 = new Label("Unghi vertical"); l2.setStyle("-fx-text-fill: white;");
         Label l3 = new Label("Poziție plan"); l3.setStyle("-fx-text-fill: white;");
@@ -317,7 +324,7 @@ public class MainController
                 l2, pitchSlider,
                 l3, offsetSlider,
                 l4, thicknessSlider,
-                cutButton);
+                cutButton, captureTopViewButton);
         crossSectionControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
         VBox controls = new VBox(15, curvatureControls, crossSectionControls);
@@ -352,5 +359,51 @@ public class MainController
         objectStage.show();
 
         openObjectWindows.put(objectId, objectStage);
+    }
+
+    private void openTopViewPreview(WritableImage image)
+    {
+        ImageView previewView = new ImageView(image);
+        previewView.setFitWidth(400);
+        previewView.setFitHeight(400);
+        previewView.setPreserveRatio(true);
+
+        Stage previewStage = new Stage();
+        previewStage.setTitle("Previzualizare sectiune");
+
+        Button saveButton = new Button("Salveaza pe disc");
+        saveButton.setStyle("-fx-background-color: #28a745; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        saveButton.setOnAction(e -> {
+            FileChooser fileChooser = new FileChooser();
+            fileChooser.setTitle("Salveaza imaginea sectiunii");
+            fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("Imagine PNG", "*.png"));
+            fileChooser.setInitialFileName("sectiune.png");
+            File file = fileChooser.showSaveDialog(previewStage);
+            if (file != null)
+            {
+                try
+                {
+                    ImageExporter.savePng(image, file);
+                    previewStage.close();
+                }
+                catch (IOException ex)
+                {
+                    ex.printStackTrace();
+                }
+            }
+        });
+
+        Button discardButton = new Button("Renunta");
+        discardButton.setStyle("-fx-background-color: #d9534f; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        discardButton.setOnAction(e -> previewStage.close());
+
+        HBox buttons = new HBox(10, saveButton, discardButton);
+        buttons.setAlignment(Pos.CENTER);
+        buttons.setStyle("-fx-padding: 10;");
+
+        VBox root = new VBox(previewView, buttons);
+        root.setStyle("-fx-background-color: #2b2b2b;");
+        previewStage.setScene(new Scene(root, 420, 460));
+        previewStage.show();
     }
 }

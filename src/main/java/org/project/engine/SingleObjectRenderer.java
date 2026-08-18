@@ -36,8 +36,10 @@ public class SingleObjectRenderer implements Runnable
     private volatile float crossSectionOffset = 0f;
     private volatile float crossSectionThickness = 0.2f;
     private volatile boolean crossSectionComputeRequested = false;
+    private volatile boolean topViewCaptureRequested = false;
 
     private Consumer<CurvatureClassifier.Result> onCurvatureComputed;
+    private Consumer<WritableImage> onTopViewCaptured;
 
     public SingleObjectRenderer(String modelPath, WritableImage fxImage, int width, int height)
     {
@@ -93,6 +95,16 @@ public class SingleObjectRenderer implements Runnable
         this.crossSectionComputeRequested = true;
     }
 
+    public void requestTopViewCapture()
+    {
+        this.topViewCaptureRequested = true;
+    }
+
+    public void setOnTopViewCaptured(Consumer<WritableImage> callback)
+    {
+        this.onTopViewCaptured = callback;
+    }
+
     @Override
     public void run()
     {
@@ -119,6 +131,7 @@ public class SingleObjectRenderer implements Runnable
         SceneObject object;
         ShaderProgram shader;
         ShaderProgram overlayShader;
+        ShaderProgram sliceShader;
         try
         {
             Mesh mesh = ModelLoader.loadModel(modelPath);
@@ -136,6 +149,11 @@ public class SingleObjectRenderer implements Runnable
             overlayShader.createVertexShader(Files.readString(Paths.get("src/main/resources/shaders/overlay_vertex.glsl")));
             overlayShader.createFragmentShader(Files.readString(Paths.get("src/main/resources/shaders/overlay_fragment.glsl")));
             overlayShader.link();
+
+            sliceShader = new ShaderProgram();
+            sliceShader.createVertexShader(Files.readString(Paths.get("src/main/resources/shaders/slice_vertex.glsl")));
+            sliceShader.createFragmentShader(Files.readString(Paths.get("src/main/resources/shaders/slice_fragment.glsl")));
+            sliceShader.link();
         }
         catch (Exception e)
         {
@@ -338,6 +356,12 @@ public class SingleObjectRenderer implements Runnable
                 GL30.glBindVertexArray(0);
                 GL30.glDisable(GL30.GL_BLEND);
 
+                if (topViewCaptureRequested)
+                {
+                    topViewCaptureRequested = false;
+                    captureTopView(sliceShader, object, crossNormal, bitangent, crossPoint, half, width, height);
+                }
+
                 GL30.glReadPixels(0, 0, width, height, GL30.GL_BGRA, GL30.GL_UNSIGNED_BYTE, pixelBuffer);
                 pixelBuffer.get(safePixelData);
                 pixelBuffer.clear();
@@ -353,6 +377,59 @@ public class SingleObjectRenderer implements Runnable
         {
             MemoryUtil.memFree(pixelBuffer);
             GLFW.glfwDestroyWindow(window);
+        }
+    }
+
+    private void captureTopView(ShaderProgram sliceShader, SceneObject object, Vector3f normal, Vector3f bitangent,
+                                 Vector3f cutPoint, float halfExtent, int captureWidth, int captureHeight)
+    {
+        float viewDistance = 5f;
+        Vector3f eye = new Vector3f(cutPoint).add(new Vector3f(normal).mul(viewDistance));
+        Matrix4f sliceView = new Matrix4f().lookAt(eye, cutPoint, bitangent);
+        Matrix4f sliceProjection = new Matrix4f().ortho(
+                -halfExtent, halfExtent, -halfExtent, halfExtent, 0.01f, viewDistance * 2f);
+
+        // Pastram doar jumatatea de dincolo de plan (departe de camera), ca sa "vedem" direct
+        // fata expusa de taietura, nu suprafata exterioara a jumatatii ramase langa camera.
+        // Randare opaca simpla (orice suprafata acoperita = negru) - functioneaza indiferent
+        // daca mesh-ul e un solid inchis sau doar o coaja subtire (multe modele scanate/low-poly
+        // nu au grosime de perete modelata, deci o umplere bazata pe paritate/interior "solid"
+        // ar iesi goala pentru ele).
+        Vector3f behindEverything = new Vector3f(cutPoint).add(new Vector3f(normal).mul(-viewDistance * 4f));
+
+        GL30.glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        GL30.glClear(GL30.GL_COLOR_BUFFER_BIT | GL30.GL_DEPTH_BUFFER_BIT);
+
+        sliceShader.bind();
+        sliceShader.setUniform("model", object.getModelMatrix());
+        sliceShader.setUniform("view", sliceView);
+        sliceShader.setUniform("projection", sliceProjection);
+        sliceShader.setUniform("sliceNormal", normal);
+        sliceShader.setUniform("sliceNearPoint", behindEverything);
+        sliceShader.setUniform("sliceFarPoint", cutPoint);
+
+        GL30.glEnable(GL30.GL_CLIP_DISTANCE0);
+        GL30.glEnable(GL30.GL_CLIP_DISTANCE1);
+        object.getMesh().render();
+        GL30.glDisable(GL30.GL_CLIP_DISTANCE0);
+        GL30.glDisable(GL30.GL_CLIP_DISTANCE1);
+        sliceShader.unbind();
+
+        ByteBuffer captureBuffer = MemoryUtil.memAlloc(captureWidth * captureHeight * 4);
+        GL30.glReadPixels(0, 0, captureWidth, captureHeight, GL30.GL_BGRA, GL30.GL_UNSIGNED_BYTE, captureBuffer);
+        byte[] captureData = new byte[captureWidth * captureHeight * 4];
+        captureBuffer.get(captureData);
+        MemoryUtil.memFree(captureBuffer);
+
+        if (onTopViewCaptured != null)
+        {
+            Consumer<WritableImage> callback = onTopViewCaptured;
+            Platform.runLater(() -> {
+                WritableImage capturedImage = new WritableImage(captureWidth, captureHeight);
+                capturedImage.getPixelWriter().setPixels(
+                        0, 0, captureWidth, captureHeight, PixelFormat.getByteBgraPreInstance(), captureData, 0, captureWidth * 4);
+                callback.accept(capturedImage);
+            });
         }
     }
 
