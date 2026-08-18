@@ -1,28 +1,49 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
-<?import javafx.scene.control.Label?>
-<?import javafx.scene.control.Menu?>
-<?import javafx.scene.control.MenuBar?>
-<?import javafx.scene.control.MenuItem?>
-<?import javafx.scene.layout.BorderPane?>
-<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.text.Font?>
 
-<BorderPane prefHeight="768.0" prefWidth="1024.0" xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.project.MainController">
+<BorderPane prefHeight="768.0" prefWidth="1024.0" stylesheets="@style.css" xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.project.MainController">
     <top>
         <MenuBar BorderPane.alignment="CENTER">
             <menus>
                 <Menu mnemonicParsing="false" text="Fisier">
                     <items>
-                        <MenuItem mnemonicParsing="false" onAction="#handleFileUpload" text="Incarca Model 3D" />
+                        <MenuItem mnemonicParsing="false" onAction="#handleFileUpload" text="Incarca model 3D" />
+                        <SeparatorMenuItem mnemonicParsing="false" />
+                        <MenuItem mnemonicParsing="false" onAction="#handleExit" text="Iesire" />
+                    </items>
+                </Menu>
+                <Menu mnemonicParsing="false" text="Vizualizare">
+                    <items>
+                        <MenuItem mnemonicParsing="false" onAction="#handleResetScene" text="Reseteaza Pozitiile" />
+                        <MenuItem mnemonicParsing="false" onAction="#handleClearScene" text="Curata Scena" />
+                    </items>
+                </Menu>
+                <Menu mnemonicParsing="false" text="Ajutor">
+                    <items>
+                        <MenuItem mnemonicParsing="false" onAction="#handleShowControls" text="Control Mouse" />
                     </items>
                 </Menu>
             </menus>
         </MenuBar>
     </top>
     <center>
-        <StackPane fx:id="canvasPlaceholder" style="-fx-background-color: #2b2b2b;" BorderPane.alignment="CENTER">
+        <StackPane fx:id="canvasPlaceholder" style="-fx-background-color: #242424;" BorderPane.alignment="CENTER">
             <children>
-                <Label text="Zona de randare 3D va fi aici" textFill="WHITE" />
+                <VBox alignment="CENTER" spacing="15.0">
+                    <Label text="Vizualizator Arheologic" textFill="#888888">
+                        <font>
+                            <Font name="System Bold" size="26.0" />
+                        </font>
+                    </Label>
+                    <Label text="Foloseste meniul Fisier -> Incarca Model 3D pentru a adauga fragmente" textFill="#666666">
+                        <font>
+                            <Font size="14.0" />
+                        </font>
+                    </Label>
+                </VBox>
             </children>
         </StackPane>
     </center>

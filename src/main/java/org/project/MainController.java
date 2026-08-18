@@ -1,11 +1,10 @@
 package org.project;
 
+import javafx.application.Platform;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.scene.Scene;
-import javafx.scene.control.Button;
-import javafx.scene.control.Label;
-import javafx.scene.control.Slider;
+import javafx.scene.control.*;
 import javafx.scene.image.ImageView;
 import javafx.scene.image.WritableImage;
 import javafx.scene.layout.StackPane;
@@ -14,6 +13,12 @@ import javafx.stage.FileChooser;
 import javafx.stage.Popup;
 import javafx.stage.Stage;
 import org.project.engine.*;
+import javafx.geometry.Pos;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.stage.Screen;
+import javafx.geometry.Rectangle2D;
 
 import java.io.File;
 import java.util.HashMap;
@@ -49,6 +54,49 @@ public class MainController
         {
             startRenderEngine(selectedFile.getAbsolutePath());
         }
+    }
+
+    @FXML
+    private void handleResetScene(ActionEvent event) {
+        if (currentRenderer != null) {
+            for (int i = 0; i < currentRenderer.objects.size(); i++) {
+                SceneObject obj = currentRenderer.objects.get(i);
+                obj.position.set(i * 3.5f, 0, 0);
+                obj.rotation.set((float) Math.toRadians(-90.0f), 0, 0);
+                obj.scale = 1.0f;
+            }
+        }
+    }
+
+    @FXML
+    private void handleClearScene(ActionEvent event) {
+        if (currentRenderer != null) {
+            currentRenderer.objects.clear();
+            selectionPopup.hide();
+            for (Stage stage : openObjectWindows.values()) {
+                stage.close();
+            }
+            openObjectWindows.clear();
+        }
+    }
+
+    @FXML
+    private void handleShowControls(ActionEvent event) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("Control Vizualizator 3D");
+        alert.setHeaderText("Instrucțiuni de manipulare");
+        alert.setContentText("• Click Stanga + Tragere pe ecran: Roteste obiectul selectat (Rotate).\n\n"
+                + "• Click Dreapta + Tragere pe ecran: Muta obiectul (Pan).\n\n"
+                + "• Rotita Mouse: Mareste sau micsoreaza obiectul (Zoom).\n\n"
+                + "• Click pe model: Selecteaza modelul (se va evidentia cu rosu).\n\n"
+                + "• Click pe fundalul gri: Pastreaza selectia curenta pentru a putea trage mouse-ul mai usor in spatiu.");
+        alert.showAndWait();
+    }
+
+    @FXML
+    private void handleExit(ActionEvent event) {
+        Platform.exit();
+        System.exit(0);
     }
 
     private void startRenderEngine(String modelPath)
@@ -136,15 +184,42 @@ public class MainController
         }
 
         Label label = new Label("Object #" + objectId);
-        Button openWindowButton = new Button("Open dedicate window");
-        openWindowButton.setOnAction(e -> openObjectWindow(objectId));
+        label.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
+        Button closeBtn = new Button("X");
+        closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #aaaaaa; -fx-font-weight: bold; -fx-cursor: hand;");
+        closeBtn.setOnAction(e -> selectionPopup.hide());
+        closeBtn.setOnMouseEntered(e -> closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;"));
+        closeBtn.setOnMouseExited(e -> closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #aaaaaa; -fx-font-weight: bold; -fx-cursor: hand;"));
+        Region spacer = new Region();
+        HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        VBox content = new VBox(8, label, openWindowButton);
-        content.setStyle("-fx-background-color: #2b2b2b; -fx-padding: 10; -fx-border-color: #555; -fx-border-width: 1;");
-        label.setStyle("-fx-text-fill: white;");
+        HBox header = new HBox(label, spacer, closeBtn);
+        header.setAlignment(Pos.CENTER_LEFT);
+        header.setPrefWidth(180);
 
+        Button openWindowButton = new Button("Open dedicated window");
+        openWindowButton.setMaxWidth(Double.MAX_VALUE);
+        openWindowButton.setOnAction(e -> {
+            selectionPopup.hide();
+            openObjectWindow(objectId);
+        });
+
+        Button deleteButton = new Button("Delete Object");
+        deleteButton.setMaxWidth(Double.MAX_VALUE);
+        deleteButton.setStyle("-fx-background-color: #d9534f; -fx-text-fill: white; -fx-cursor: hand;");
+        deleteButton.setOnAction(e -> {
+            selectionPopup.hide();
+            if (currentRenderer != null) {
+                currentRenderer.queueDeleteObject(objectId);
+            }
+            Stage dedicatedWindow = openObjectWindows.remove(objectId);
+            if (dedicatedWindow != null) {
+                dedicatedWindow.close();
+            }
+        });
+        VBox content = new VBox(8, header, openWindowButton, deleteButton);
+        content.setStyle("-fx-background-color: #2b2b2b; -fx-padding: 10; -fx-border-color: #555; -fx-border-width: 1; -fx-border-radius: 3; -fx-background-radius: 3;");
         selectionPopup.getContent().setAll(content);
-
         Stage ownerWindow = (Stage) canvasPlaceholder.getScene().getWindow();
         selectionPopup.show(ownerWindow, lastClickScreenX, lastClickScreenY);
     }
@@ -192,23 +267,28 @@ public class MainController
         });
         imageView.setOnScroll(event -> objectRenderer.scale((float) event.getDeltaY() * 0.005f));
 
-        Button computeButton = new Button("Calculează curbura");
+        Button computeButton = new Button("Calculeaza curbura");
+        computeButton.setStyle("-fx-background-color: #0078D7; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        computeButton.setMaxWidth(Double.MAX_VALUE);
         computeButton.setOnAction(e -> objectRenderer.requestComputeCurvature());
 
-        Label equationsLabel = new Label("Apasă \"Calculează curbura\" pentru rezultat.");
-        equationsLabel.setStyle("-fx-font-family: monospace;");
+        /*Label equationsLabel = new Label("Apasă \"Calculeaza curbura\" pentru rezultat.");
+        equationsLabel.setStyle("-fx-font-family: monospace; -fx-text-fill: #cccccc;");
+        equationsLabel.setWrapText(true);
         objectRenderer.setOnCurvatureComputed(result -> equationsLabel.setText(String.format(
                 "Exterior: %.2fx + %.2fy + %.2fz + %.2f = 0%nInterior: %.2fx + %.2fy + %.2fz + %.2f = 0",
                 result.exteriorPlaneNormal.x, result.exteriorPlaneNormal.y, result.exteriorPlaneNormal.z,
                 -result.exteriorPlaneNormal.dot(result.exteriorPlanePoint),
                 result.interiorPlaneNormal.x, result.interiorPlaneNormal.y, result.interiorPlaneNormal.z,
-                -result.interiorPlaneNormal.dot(result.interiorPlanePoint))));
+                -result.interiorPlaneNormal.dot(result.interiorPlanePoint))));*/
 
         Slider yawSlider = new Slider(0, 360, 0);
         Slider pitchSlider = new Slider(-89, 89, 0);
         Slider offsetSlider = new Slider(-2.5, 2.5, 0);
-        Slider thicknessSlider = new Slider(0, 1.5, 0.2);
-        objectRenderer.setCrossSectionThickness(0.2f);
+        Slider thicknessSlider = new Slider(0, 1.5, 0.0);
+
+        objectRenderer.setCrossSectionThickness(0.0f);
+
         yawSlider.valueProperty().addListener((obs, oldVal, newVal) ->
                 objectRenderer.setCrossSectionYaw((float) Math.toRadians(newVal.doubleValue())));
         pitchSlider.valueProperty().addListener((obs, oldVal, newVal) ->
@@ -218,31 +298,53 @@ public class MainController
         thicknessSlider.valueProperty().addListener((obs, oldVal, newVal) ->
                 objectRenderer.setCrossSectionThickness(newVal.floatValue()));
 
-        Button cutButton = new Button("Decupează secțiune");
+        Button cutButton = new Button("Decupeaza sectiune");
+        cutButton.setStyle("-fx-background-color: #28a745; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        cutButton.setMaxWidth(Double.MAX_VALUE);
         cutButton.setOnAction(e -> objectRenderer.requestComputeCrossSection());
 
-        VBox curvatureControls = new VBox(6, computeButton, equationsLabel);
-        curvatureControls.setStyle("-fx-padding: 10;");
+        Label l1 = new Label("Secțiune 2D — unghi orizontal"); l1.setStyle("-fx-text-fill: white;");
+        Label l2 = new Label("Unghi vertical"); l2.setStyle("-fx-text-fill: white;");
+        Label l3 = new Label("Poziție plan"); l3.setStyle("-fx-text-fill: white;");
+        Label l4 = new Label("Grosime plan"); l4.setStyle("-fx-text-fill: white;");
 
-        VBox crossSectionControls = new VBox(6,
-                new Label("Secțiune 2D — unghi orizontal"), yawSlider,
-                new Label("Unghi vertical"), pitchSlider,
-                new Label("Poziție plan"), offsetSlider,
-                new Label("Grosime plan"), thicknessSlider,
+        ///
+        VBox curvatureControls = new VBox(8, computeButton);
+        curvatureControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
+
+        VBox crossSectionControls = new VBox(8,
+                l1, yawSlider,
+                l2, pitchSlider,
+                l3, offsetSlider,
+                l4, thicknessSlider,
                 cutButton);
-        crossSectionControls.setStyle("-fx-padding: 10;");
+        crossSectionControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
-        VBox controls = new VBox(10, curvatureControls, crossSectionControls);
+        VBox controls = new VBox(15, curvatureControls, crossSectionControls);
+        controls.setStyle("-fx-padding: 15; -fx-background-color: #2b2b2b;");
 
-        VBox root = new VBox(imageView, controls);
+        ScrollPane scrollPane = new ScrollPane(controls);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setStyle("-fx-background: #2b2b2b; -fx-border-color: #2b2b2b;");
+
+        VBox root = new VBox(imageView, scrollPane);
+        root.setStyle("-fx-background-color: #2b2b2b;");
 
         Thread objectRenderThread = new Thread(objectRenderer);
         objectRenderThread.setDaemon(true);
         objectRenderThread.start();
 
         Stage objectStage = new Stage();
-        objectStage.setTitle("Obiect #" + objectId);
-        objectStage.setScene(new Scene(root, viewSize, viewSize + 420));
+        objectStage.setTitle("Analiza Obiect #" + objectId);
+
+        Scene scene = new Scene(root, viewSize, 850);
+        objectStage.setScene(scene);
+
+        Rectangle2D screenBounds = Screen.getPrimary().getVisualBounds();
+        if (850 > screenBounds.getHeight()) {
+            objectStage.setHeight(screenBounds.getHeight() - 40);
+        }
+
         objectStage.setOnCloseRequest(e -> {
             objectRenderThread.interrupt();
             openObjectWindows.remove(objectId);
