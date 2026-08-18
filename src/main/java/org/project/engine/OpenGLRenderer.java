@@ -10,13 +10,16 @@ import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.system.MemoryUtil;
 
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
-import java.util.function.IntConsumer;
+import java.util.Set;
+import java.util.function.Consumer;
 
 public class OpenGLRenderer implements Runnable
 {
@@ -30,46 +33,43 @@ public class OpenGLRenderer implements Runnable
     private final ConcurrentLinkedQueue<Integer> pendingDeletions = new ConcurrentLinkedQueue<>();
     private int nextObjectId = 1;
 
-    public void queueModelLoad(String filePath)
-    {
-        pendingModels.add(filePath);
-    }
-    public void queueDeleteObject(int objectId)
-    {
-        pendingDeletions.add(objectId);
-    }
+    public void queueModelLoad(String filePath) { pendingModels.add(filePath); }
+    public void queueDeleteObject(int objectId) { pendingDeletions.add(objectId); }
 
     private volatile boolean mouseClicked = false;
     private volatile int clickX = 0;
     private volatile int clickY = 0;
-    private volatile int selectedObjectId = -1;
-    private IntConsumer onSelectionChanged;
+    private volatile boolean multiSelectModifier = false;
+
+    private final Set<Integer> selectedObjectIds = ConcurrentHashMap.newKeySet();
+    private Consumer<Set<Integer>> onSelectionChanged;
 
     public OpenGLRenderer(WritableImage fxImage)
     {
         this.fxImage = fxImage;
     }
 
-    public void registerClick(int x, int y)
+    public void registerClick(int x, int y, boolean multiSelect)
     {
         this.clickX = x;
         this.clickY = y;
+        this.multiSelectModifier = multiSelect;
         this.mouseClicked = true;
     }
 
-    public int getSelectedObjectId()
+    public Set<Integer> getSelectedObjectIds()
     {
-        return selectedObjectId;
+        return selectedObjectIds;
     }
 
-    public void setOnSelectionChanged(IntConsumer callback)
+    public void setOnSelectionChanged(Consumer<Set<Integer>> callback)
     {
         this.onSelectionChanged = callback;
     }
 
     @Override
     public void run() {
-        if (!GLFW.glfwInit()) throw new IllegalStateException("Nu s-a putut inițializa GLFW");
+        if (!GLFW.glfwInit()) throw new IllegalStateException("Nu s-a putut initializa GLFW");
 
         GLFW.glfwWindowHint(GLFW.GLFW_VISIBLE, GLFW.GLFW_FALSE);
         long window = GLFW.glfwCreateWindow(width, height, "Offscreen", 0, 0);
@@ -134,11 +134,9 @@ public class OpenGLRenderer implements Runnable
                         Mesh mesh = ModelLoader.loadModel(newModelPath);
                         SceneObject newPiece = new SceneObject(nextObjectId++, mesh, newModelPath);
                         objects.add(newPiece);
-                        System.out.println("Obiect incarcat cu succes! ID: " + newPiece.getId());
                     }
                     catch (Exception e)
                     {
-                        System.err.println("Eroare la incarcarea modelului din coada: ");
                         e.printStackTrace();
                     }
                 }
@@ -148,13 +146,13 @@ public class OpenGLRenderer implements Runnable
                 {
                     final int idToRemove = deleteId;
                     objects.removeIf(obj -> obj.getId() == idToRemove);
-                    if (selectedObjectId == idToRemove) {
-                        selectedObjectId = -1;
+                    if (selectedObjectIds.contains(idToRemove)) {
+                        selectedObjectIds.remove(idToRemove);
                         if (onSelectionChanged != null) {
-                            Platform.runLater(() -> onSelectionChanged.accept(-1));
+                            Set<Integer> copy = new HashSet<>(selectedObjectIds);
+                            Platform.runLater(() -> onSelectionChanged.accept(copy));
                         }
                     }
-                    System.out.println("Obiect sters cu succes! ID: " + idToRemove);
                 }
                 GL30.glClearColor(0.16f, 0.16f, 0.16f, 1.0f);
                 GL30.glClear(GL30.GL_COLOR_BUFFER_BIT | GL30.GL_DEPTH_BUFFER_BIT);
@@ -167,7 +165,7 @@ public class OpenGLRenderer implements Runnable
                     shader.setUniform("model", obj.getModelMatrix());
                     shader.setUniform("objectIdColor", obj.getPickingColor());
 
-                    int isSelected = (obj.getId() == selectedObjectId) ? 1 : 0;
+                    int isSelected = selectedObjectIds.contains(obj.getId()) ? 1 : 0;
                     shader.setUniform("isSelected", isSelected);
 
                     obj.getMesh().render();
@@ -183,15 +181,29 @@ public class OpenGLRenderer implements Runnable
                     int pickedId = r + (g << 8) + (b << 16);
 
                     int newSelection = (pickedId == 0 || pickedId == 2697513) ? -1 : pickedId;
+                    boolean changed = false;
 
-                    if (newSelection != selectedObjectId) {
-                        selectedObjectId = newSelection;
-                        System.out.println("Ciob selectat cu ID: " + selectedObjectId);
-                        if (onSelectionChanged != null)
-                        {
-                            int notifiedId = selectedObjectId;
-                            Platform.runLater(() -> onSelectionChanged.accept(notifiedId));
+                    if (newSelection != -1) {
+                        if (multiSelectModifier) {
+                            if (selectedObjectIds.contains(newSelection)) selectedObjectIds.remove(newSelection);
+                            else selectedObjectIds.add(newSelection);
+                        } else {
+                            if (selectedObjectIds.size() != 1 || !selectedObjectIds.contains(newSelection)) {
+                                selectedObjectIds.clear();
+                                selectedObjectIds.add(newSelection);
+                            }
                         }
+                        changed = true;
+                    } else {
+                        if (!multiSelectModifier && !selectedObjectIds.isEmpty()) {
+                            selectedObjectIds.clear();
+                            changed = true;
+                        }
+                    }
+
+                    if (changed && onSelectionChanged != null) {
+                        Set<Integer> copy = new HashSet<>(selectedObjectIds);
+                        Platform.runLater(() -> onSelectionChanged.accept(copy));
                     }
 
                     GL30.glReadBuffer(GL30.GL_COLOR_ATTACHMENT0);
@@ -214,10 +226,11 @@ public class OpenGLRenderer implements Runnable
             GLFW.glfwDestroyWindow(window);
         }
     }
+
     public void moveSelectedObject(float deltaX, float deltaY) {
-        if (selectedObjectId == -1) return;
+        if (selectedObjectIds.isEmpty()) return;
         for (SceneObject obj : objects) {
-            if (obj.getId() == selectedObjectId) {
+            if (selectedObjectIds.contains(obj.getId())) {
                 obj.position.x += deltaX * 0.01f;
                 obj.position.y += deltaY * 0.01f;
 
@@ -226,30 +239,26 @@ public class OpenGLRenderer implements Runnable
 
                 if (obj.position.y > 2.0f) obj.position.y = 2.0f;
                 if (obj.position.y < -2.0f) obj.position.y = -2.0f;
-
-                break;
             }
         }
     }
 
     public void rotateSelectedObject(float deltaX, float deltaY) {
-        if (selectedObjectId == -1) return;
+        if (selectedObjectIds.isEmpty()) return;
         for (SceneObject obj : objects) {
-            if (obj.getId() == selectedObjectId) {
+            if (selectedObjectIds.contains(obj.getId())) {
                 obj.rotation.y -= deltaX * 0.01f;
                 obj.rotation.x -= deltaY * 0.01f;
-                break;
             }
         }
     }
 
     public void scaleSelectedObject(float delta) {
-        if (selectedObjectId == -1) return;
+        if (selectedObjectIds.isEmpty()) return;
         for (SceneObject obj : objects) {
-            if (obj.getId() == selectedObjectId) {
+            if (selectedObjectIds.contains(obj.getId())) {
                 obj.scale += delta;
                 if (obj.scale < 0.05f) obj.scale = 0.05f;
-                break;
             }
         }
     }
