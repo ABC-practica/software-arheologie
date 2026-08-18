@@ -401,7 +401,10 @@ public class SingleObjectRenderer implements Runnable
         GL30.glClear(GL30.GL_COLOR_BUFFER_BIT | GL30.GL_DEPTH_BUFFER_BIT);
 
         sliceShader.bind();
-        sliceShader.setUniform("model", object.getModelMatrix());
+        // Ignoram intentionat rotatia/scala curenta a obiectului (cea din drag/scroll cu mouse-ul):
+        // planul (yaw/pitch/offset) trebuie sa taie mereu aceeasi parte a obiectului, indiferent
+        // cum a fost rotit pe ecran - ca si cum planul ar fi atasat de obiect, nu de camera.
+        sliceShader.setUniform("model", new Matrix4f());
         sliceShader.setUniform("view", sliceView);
         sliceShader.setUniform("projection", sliceProjection);
         sliceShader.setUniform("sliceNormal", normal);
