@@ -27,11 +27,16 @@ public class OpenGLRenderer implements Runnable
     public final List<SceneObject> objects = new ArrayList<>();
 
     private final ConcurrentLinkedQueue<String> pendingModels = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Integer> pendingDeletions = new ConcurrentLinkedQueue<>();
     private int nextObjectId = 1;
 
     public void queueModelLoad(String filePath)
     {
         pendingModels.add(filePath);
+    }
+    public void queueDeleteObject(int objectId)
+    {
+        pendingDeletions.add(objectId);
     }
 
     private volatile boolean mouseClicked = false;
@@ -136,6 +141,20 @@ public class OpenGLRenderer implements Runnable
                         System.err.println("Eroare la incarcarea modelului din coada: ");
                         e.printStackTrace();
                     }
+                }
+
+                Integer deleteId;
+                while ((deleteId = pendingDeletions.poll()) != null)
+                {
+                    final int idToRemove = deleteId;
+                    objects.removeIf(obj -> obj.getId() == idToRemove);
+                    if (selectedObjectId == idToRemove) {
+                        selectedObjectId = -1;
+                        if (onSelectionChanged != null) {
+                            Platform.runLater(() -> onSelectionChanged.accept(-1));
+                        }
+                    }
+                    System.out.println("Obiect sters cu succes! ID: " + idToRemove);
                 }
                 GL30.glClearColor(0.16f, 0.16f, 0.16f, 1.0f);
                 GL30.glClear(GL30.GL_COLOR_BUFFER_BIT | GL30.GL_DEPTH_BUFFER_BIT);
