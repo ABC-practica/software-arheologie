@@ -17,7 +17,6 @@ public class Texture
             IntBuffer w = stack.mallocInt(1);
             IntBuffer h = stack.mallocInt(1);
             IntBuffer channels = stack.mallocInt(1);
-
             ByteBuffer pixels = STBImage.stbi_load(path, w, h, channels, 4);
             if (pixels == null)
             {
@@ -68,6 +67,15 @@ public class Texture
         GL30.glTexImage2D(GL30.GL_TEXTURE_2D, 0, GL30.GL_RGBA, width, height, 0, GL30.GL_RGBA, GL30.GL_UNSIGNED_BYTE, pixels);
         GL30.glGenerateMipmap(GL30.GL_TEXTURE_2D);
         GL30.glBindTexture(GL30.GL_TEXTURE_2D, 0);
+        return textureId;
+    }
+
+    public static int createColorTexture(int r, int g, int b)
+    {
+        ByteBuffer pixel = MemoryUtil.memAlloc(4);
+        pixel.put((byte) r).put((byte) g).put((byte) b).put((byte) 255).flip();
+        int textureId = upload(pixel, 1, 1);
+        MemoryUtil.memFree(pixel);
         return textureId;
     }
 }

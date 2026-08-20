@@ -75,8 +75,6 @@ public class CurvatureClassifier
 
             Vector3f centroid = new Vector3f(a).add(b).add(c).mul(1f / 3f);
 
-            // Grupez dupa directia normalei (cele 2 suprafete ale peretelui au normale aproape opuse),
-            // nu dupa pozitia fata de centrul intregului obiect.
             boolean inGroupA = normal.dot(referenceNormal) >= 0;
             List<Float> targetVerts = inGroupA ? groupAVerts : groupBVerts;
             targetVerts.add(a.x); targetVerts.add(a.y); targetVerts.add(a.z);
@@ -102,7 +100,6 @@ public class CurvatureClassifier
         Vector3f groupBNormal = groupBCount > 0 ? new Vector3f(groupBNormalSum).normalize() : new Vector3f(0, 0, 1);
         Vector3f groupBCentroid = groupBCount > 0 ? new Vector3f(groupBCentroidSum).mul(1f / groupBCount) : new Vector3f();
 
-        // Dintre cele 2 grupuri (deja separate corect dupa directie), cel mai departe de centru e exteriorul.
         boolean groupAIsExterior = groupACentroid.length() >= groupBCentroid.length();
 
         float[] exteriorTriangles = toArray(groupAIsExterior ? groupAVerts : groupBVerts);

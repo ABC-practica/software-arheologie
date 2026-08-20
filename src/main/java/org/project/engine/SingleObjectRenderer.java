@@ -389,21 +389,12 @@ public class SingleObjectRenderer implements Runnable
         Matrix4f sliceProjection = new Matrix4f().ortho(
                 -halfExtent, halfExtent, -halfExtent, halfExtent, 0.01f, viewDistance * 2f);
 
-        // Pastram doar jumatatea de dincolo de plan (departe de camera), ca sa "vedem" direct
-        // fata expusa de taietura, nu suprafata exterioara a jumatatii ramase langa camera.
-        // Randare opaca simpla (orice suprafata acoperita = negru) - functioneaza indiferent
-        // daca mesh-ul e un solid inchis sau doar o coaja subtire (multe modele scanate/low-poly
-        // nu au grosime de perete modelata, deci o umplere bazata pe paritate/interior "solid"
-        // ar iesi goala pentru ele).
         Vector3f behindEverything = new Vector3f(cutPoint).add(new Vector3f(normal).mul(-viewDistance * 4f));
 
         GL30.glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         GL30.glClear(GL30.GL_COLOR_BUFFER_BIT | GL30.GL_DEPTH_BUFFER_BIT);
 
         sliceShader.bind();
-        // Ignoram intentionat rotatia/scala curenta a obiectului (cea din drag/scroll cu mouse-ul):
-        // planul (yaw/pitch/offset) trebuie sa taie mereu aceeasi parte a obiectului, indiferent
-        // cum a fost rotit pe ecran - ca si cum planul ar fi atasat de obiect, nu de camera.
         sliceShader.setUniform("model", new Matrix4f());
         sliceShader.setUniform("view", sliceView);
         sliceShader.setUniform("projection", sliceProjection);

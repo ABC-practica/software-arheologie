@@ -10,6 +10,7 @@ import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.system.MemoryUtil;
 
+import java.io.File;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.nio.ByteBuffer;
@@ -30,10 +31,12 @@ public class OpenGLRenderer implements Runnable
     public final List<SceneObject> objects = new ArrayList<>();
 
     private final ConcurrentLinkedQueue<String> pendingModels = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<File> pendingSections = new ConcurrentLinkedQueue<>();
     private final ConcurrentLinkedQueue<Integer> pendingDeletions = new ConcurrentLinkedQueue<>();
     private int nextObjectId = 1;
 
     public void queueModelLoad(String filePath) { pendingModels.add(filePath); }
+    public void queueSectionLoad(File folder) { pendingSections.add(folder); }
     public void queueDeleteObject(int objectId) { pendingDeletions.add(objectId); }
 
     private volatile boolean mouseClicked = false;
@@ -57,14 +60,19 @@ public class OpenGLRenderer implements Runnable
         this.mouseClicked = true;
     }
 
-    public Set<Integer> getSelectedObjectIds()
-    {
-        return selectedObjectIds;
-    }
+    public Set<Integer> getSelectedObjectIds() { return selectedObjectIds; }
 
     public void setOnSelectionChanged(Consumer<Set<Integer>> callback)
     {
         this.onSelectionChanged = callback;
+    }
+    public boolean isSectionObject(int id) {
+        for (SceneObject obj : objects) {
+            if (obj.getId() == id) {
+                return obj.isSectionBox || "MARKER_NW".equals(obj.getSourcePath());
+            }
+        }
+        return false;
     }
 
     @Override
@@ -96,8 +104,7 @@ public class OpenGLRenderer implements Runnable
         GL30.glFramebufferRenderbuffer(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_STENCIL_ATTACHMENT, GL30.GL_RENDERBUFFER, rbo);
 
         ShaderProgram shader;
-        try
-        {
+        try {
             shader = new ShaderProgram();
             shader.createVertexShader(Files.readString(Paths.get("src/main/resources/shaders/vertex.glsl")));
             shader.createFragmentShader(Files.readString(Paths.get("src/main/resources/shaders/fragment.glsl")));
@@ -105,9 +112,7 @@ public class OpenGLRenderer implements Runnable
             shader.bind();
             shader.setUniform("texture1", 0);
             shader.unbind();
-        }
-        catch (Exception e)
-        {
+        } catch (Exception e) {
             e.printStackTrace();
             return;
         }
@@ -127,23 +132,78 @@ public class OpenGLRenderer implements Runnable
             while (!Thread.interrupted())
             {
                 String newModelPath = pendingModels.poll();
-                if (newModelPath != null)
-                {
-                    try
-                    {
+                if (newModelPath != null) {
+                    try {
                         Mesh mesh = ModelLoader.loadModel(newModelPath);
                         SceneObject newPiece = new SceneObject(nextObjectId++, mesh, newModelPath);
                         objects.add(newPiece);
-                    }
-                    catch (Exception e)
-                    {
-                        e.printStackTrace();
-                    }
+                    } catch (Exception e) { e.printStackTrace(); }
+                }
+
+                File sectionFolder;
+                while ((sectionFolder = pendingSections.poll()) != null) {
+                    try {
+                        File txtFile = new File(sectionFolder, "sectiune.txt");
+                        if (!txtFile.exists()) throw new Exception("Fisierul sectiune.txt lipseste!");
+
+                        List<String> lines = Files.readAllLines(txtFile.toPath());
+                        SceneObject sectionBox = null;
+
+                        for (String line : lines) {
+                            if (line.trim().isEmpty()) continue;
+                            String[] parts = line.split("\\s+");
+
+                            if (parts[0].equals("dim:") && parts.length >= 4) {
+                                float w = Float.parseFloat(parts[1]);
+                                float h = Float.parseFloat(parts[2]);
+                                float d = Float.parseFloat(parts[3]);
+
+                                Mesh boxMesh = PrimitiveFactory.createLinesBox(w, h, d, Texture.createDefaultWhite());
+                                sectionBox = new SceneObject(nextObjectId++, boxMesh, "SECTIUNE");
+                                sectionBox.isSectionBox = true;
+                                sectionBox.scale = 0.35f;
+                                objects.add(sectionBox);
+
+                                int blueTexId = Texture.createColorTexture(0, 100, 255);
+                                Mesh markerMesh = PrimitiveFactory.createBox(0.2f, 0.2f, 0.2f, blueTexId);
+                                SceneObject nwMarker = new SceneObject(nextObjectId++, markerMesh, "MARKER_NW");
+                                nwMarker.parent = sectionBox;
+
+                                nwMarker.position.set(-w / 2, h / 2, -d / 2);
+                                objects.add(nwMarker);
+                            }
+                            else if (parts[0].equals("obj:") && parts.length >= 8 && sectionBox != null) {
+                                String filename = parts[1];
+                                float px = Float.parseFloat(parts[2]);
+                                float py = Float.parseFloat(parts[3]);
+                                float pz = Float.parseFloat(parts[4]);
+                                float rx = Float.parseFloat(parts[5]);
+                                float ry = Float.parseFloat(parts[6]);
+                                float rz = Float.parseFloat(parts[7]);
+
+                                float objScale = (parts.length >= 9) ? Float.parseFloat(parts[8]) : 0.15f;
+
+                                File objFile = new File(sectionFolder, filename);
+                                if (!objFile.exists()) {
+                                    System.err.println("Fisier negasit, sarim peste: " + objFile.getAbsolutePath());
+                                    continue;
+                                }
+
+                                Mesh mesh = ModelLoader.loadModel(objFile.getAbsolutePath());
+                                SceneObject child = new SceneObject(nextObjectId++, mesh, objFile.getAbsolutePath());
+
+                                child.parent = sectionBox;
+                                child.position.set(px, py, pz);
+                                child.rotation.set((float)Math.toRadians(rx), (float)Math.toRadians(ry), (float)Math.toRadians(rz));
+                                child.scale = objScale;
+                                objects.add(child);
+                            }
+                        }
+                    } catch (Exception e) { e.printStackTrace(); }
                 }
 
                 Integer deleteId;
-                while ((deleteId = pendingDeletions.poll()) != null)
-                {
+                while ((deleteId = pendingDeletions.poll()) != null) {
                     final int idToRemove = deleteId;
                     objects.removeIf(obj -> obj.getId() == idToRemove);
                     if (selectedObjectIds.contains(idToRemove)) {
@@ -154,22 +214,21 @@ public class OpenGLRenderer implements Runnable
                         }
                     }
                 }
+
                 GL30.glClearColor(0.16f, 0.16f, 0.16f, 1.0f);
                 GL30.glClear(GL30.GL_COLOR_BUFFER_BIT | GL30.GL_DEPTH_BUFFER_BIT);
 
                 shader.bind();
                 shader.setUniform("projection", projection);
                 shader.setUniform("view", view);
-                for (SceneObject obj : objects)
-                {
+
+                for (SceneObject obj : objects) {
                     shader.setUniform("model", obj.getModelMatrix());
                     shader.setUniform("objectIdColor", obj.getPickingColor());
-
-                    int isSelected = selectedObjectIds.contains(obj.getId()) ? 1 : 0;
-                    shader.setUniform("isSelected", isSelected);
-
+                    shader.setUniform("isSelected", selectedObjectIds.contains(obj.getId()) ? 1 : 0);
                     obj.getMesh().render();
                 }
+
                 if (mouseClicked) {
                     mouseClicked = false;
                     GL30.glReadBuffer(GL30.GL_COLOR_ATTACHMENT1);
@@ -183,7 +242,15 @@ public class OpenGLRenderer implements Runnable
                     int newSelection = (pickedId == 0 || pickedId == 2697513) ? -1 : pickedId;
                     boolean changed = false;
 
-                    if (newSelection != -1) {
+                    if (newSelection != -1)
+                    {
+                        for (SceneObject o : objects) {
+                            if (o.getId() == newSelection && "MARKER_NW".equals(o.getSourcePath()) && o.parent != null) {
+                                newSelection = o.parent.getId();
+                                break;
+                            }
+                        }
+
                         if (multiSelectModifier) {
                             if (selectedObjectIds.contains(newSelection)) selectedObjectIds.remove(newSelection);
                             else selectedObjectIds.add(newSelection);
@@ -205,9 +272,9 @@ public class OpenGLRenderer implements Runnable
                         Set<Integer> copy = new HashSet<>(selectedObjectIds);
                         Platform.runLater(() -> onSelectionChanged.accept(copy));
                     }
-
                     GL30.glReadBuffer(GL30.GL_COLOR_ATTACHMENT0);
                 }
+
                 GL30.glReadPixels(0, 0, width, height, GL30.GL_BGRA, GL30.GL_UNSIGNED_BYTE, pixelBuffer);
                 pixelBuffer.get(safePixelData);
                 pixelBuffer.clear();
@@ -231,14 +298,10 @@ public class OpenGLRenderer implements Runnable
         if (selectedObjectIds.isEmpty()) return;
         for (SceneObject obj : objects) {
             if (selectedObjectIds.contains(obj.getId())) {
+                if (obj.parent != null) continue;
+
                 obj.position.x += deltaX * 0.01f;
                 obj.position.y += deltaY * 0.01f;
-
-                if (obj.position.x > 2.7f) obj.position.x = 2.7f;
-                if (obj.position.x < -2.7f) obj.position.x = -2.7f;
-
-                if (obj.position.y > 2.0f) obj.position.y = 2.0f;
-                if (obj.position.y < -2.0f) obj.position.y = -2.0f;
             }
         }
     }
@@ -247,6 +310,8 @@ public class OpenGLRenderer implements Runnable
         if (selectedObjectIds.isEmpty()) return;
         for (SceneObject obj : objects) {
             if (selectedObjectIds.contains(obj.getId())) {
+                if (obj.parent != null) continue;
+
                 obj.rotation.y -= deltaX * 0.01f;
                 obj.rotation.x -= deltaY * 0.01f;
             }
@@ -257,6 +322,8 @@ public class OpenGLRenderer implements Runnable
         if (selectedObjectIds.isEmpty()) return;
         for (SceneObject obj : objects) {
             if (selectedObjectIds.contains(obj.getId())) {
+                if (obj.parent != null) continue;
+
                 obj.scale += delta;
                 if (obj.scale < 0.05f) obj.scale = 0.05f;
             }

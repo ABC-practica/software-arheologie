@@ -139,19 +139,16 @@ public class ModelLoader
             vertices[i * 3 + 1] = (vertices[i * 3 + 1] - centerY) * scale;
             vertices[i * 3 + 2] = (vertices[i * 3 + 2] - centerZ) * scale;
         }
-
         return new Mesh(vertices, normals, texCoords, indices, parts);
     }
 
     private static void collectMeshTransforms(AINode node, Matrix4f parentTransform, Map<Integer, Matrix4f> out)
     {
         Matrix4f worldTransform = new Matrix4f(parentTransform).mul(toJoml(node.mTransformation()));
-
         for (int i = 0; i < node.mNumMeshes(); i++)
         {
             out.put(node.mMeshes().get(i), worldTransform);
         }
-
         for (int i = 0; i < node.mNumChildren(); i++)
         {
             AINode child = AINode.create(node.mChildren().get(i));
@@ -175,21 +172,17 @@ public class ModelLoader
         {
             return Texture.createDefaultWhite();
         }
-
         AIMaterial material = AIMaterial.create(scene.mMaterials().get(aiMesh.mMaterialIndex()));
         AIString texPath = AIString.calloc();
         int result = Assimp.aiGetMaterialTexture(material, Assimp.aiTextureType_DIFFUSE, 0, texPath,
                 (java.nio.IntBuffer) null, null, null, null, null, null);
-
         if (result != Assimp.aiReturn_SUCCESS)
         {
             texPath.free();
             return Texture.createDefaultWhite();
         }
-
         String texPathStr = texPath.dataString();
         texPath.free();
-
         try
         {
             if (texPathStr.startsWith("*"))
