@@ -139,16 +139,19 @@ public class ModelLoader
             vertices[i * 3 + 1] = (vertices[i * 3 + 1] - centerY) * scale;
             vertices[i * 3 + 2] = (vertices[i * 3 + 2] - centerZ) * scale;
         }
+
         return new Mesh(vertices, normals, texCoords, indices, parts);
     }
 
     private static void collectMeshTransforms(AINode node, Matrix4f parentTransform, Map<Integer, Matrix4f> out)
     {
         Matrix4f worldTransform = new Matrix4f(parentTransform).mul(toJoml(node.mTransformation()));
+
         for (int i = 0; i < node.mNumMeshes(); i++)
         {
             out.put(node.mMeshes().get(i), worldTransform);
         }
+
         for (int i = 0; i < node.mNumChildren(); i++)
         {
             AINode child = AINode.create(node.mChildren().get(i));
@@ -170,19 +173,22 @@ public class ModelLoader
     {
         if (aiMesh.mMaterialIndex() < 0 || scene.mMaterials() == null)
         {
-            return Texture.createDefaultWhite();
+            return tryGuessTexture(modelFilePath);
         }
+
         AIMaterial material = AIMaterial.create(scene.mMaterials().get(aiMesh.mMaterialIndex()));
         AIString texPath = AIString.calloc();
         int result = Assimp.aiGetMaterialTexture(material, Assimp.aiTextureType_DIFFUSE, 0, texPath,
                 (java.nio.IntBuffer) null, null, null, null, null, null);
-        if (result != Assimp.aiReturn_SUCCESS)
+        if (result != Assimp.aiReturn_SUCCESS || texPath.length() == 0)
         {
             texPath.free();
-            return Texture.createDefaultWhite();
+            return tryGuessTexture(modelFilePath);
         }
+
         String texPathStr = texPath.dataString();
         texPath.free();
+
         try
         {
             if (texPathStr.startsWith("*"))
@@ -194,15 +200,80 @@ public class ModelLoader
             }
             else
             {
-                File modelDir = new File(modelFilePath).getParentFile();
-                File textureFile = modelDir != null ? new File(modelDir, texPathStr) : new File(texPathStr);
-                return Texture.loadFromFile(textureFile.getPath());
+                File resolvedFile = resolveTexturePath(modelFilePath, texPathStr);
+                if (resolvedFile != null && resolvedFile.exists()) {
+                    return Texture.loadFromFile(resolvedFile.getPath());
+                } else {
+                    return tryGuessTexture(modelFilePath);
+                }
             }
         }
         catch (Exception e)
         {
-            System.err.println("Nu s-a putut incarca textura modelului, se foloseste una alba: " + e.getMessage());
-            return Texture.createDefaultWhite();
+            System.err.println("Calea din fisierul MTL este complet invalida. Cautare automata...");
+            return tryGuessTexture(modelFilePath);
         }
+    }
+
+    private static File resolveTexturePath(String modelFilePath, String texPathStr) {
+        File modelDir = new File(modelFilePath).getParentFile();
+        File texFileFromStr = new File(texPathStr);
+        String fileName = texFileFromStr.getName();
+        File attempt1 = new File(modelDir, texPathStr);
+        if (attempt1.exists()) return attempt1;
+        File attempt2 = new File(modelDir, fileName);
+        if (attempt2.exists()) return attempt2;
+        if (modelDir.getParentFile() != null) {
+            File texturesDir = new File(modelDir.getParentFile(), "textures");
+            File attempt3 = new File(texturesDir, fileName);
+            if (attempt3.exists()) return attempt3;
+        }
+
+        return null;
+    }
+    private static int tryGuessTexture(String modelFilePath) {
+        File modelFile = new File(modelFilePath);
+        File modelDir = modelFile.getParentFile();
+        String baseName = modelFile.getName();
+        int dotIndex = baseName.lastIndexOf('.');
+        if (dotIndex > 0) baseName = baseName.substring(0, dotIndex);
+        File guessed = findImageInDir(modelDir, baseName);
+        if (guessed == null && modelDir.getParentFile() != null) {
+            File texturesDir = new File(modelDir.getParentFile(), "textures");
+            guessed = findImageInDir(texturesDir, baseName);
+        }
+
+        if (guessed != null) {
+            System.out.println("Textura recuperata automat pentru " + modelFile.getName() + ": " + guessed.getName());
+            try {
+                return Texture.loadFromFile(guessed.getPath());
+            } catch (Exception e) {
+                return Texture.createDefaultWhite();
+            }
+        }
+
+        return Texture.createDefaultWhite();
+    }
+    private static File findImageInDir(File dir, String baseName) {
+        if (!dir.exists() || !dir.isDirectory()) return null;
+        File[] files = dir.listFiles((d, name) -> {
+            String lower = name.toLowerCase();
+            return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png");
+        });
+        if (files == null || files.length == 0) return null;
+        for (File f : files) {
+            String lower = f.getName().toLowerCase();
+            if (lower.contains(baseName.toLowerCase()) && !lower.contains("normal") && !lower.contains("roughness") && !lower.contains("bump")) {
+                return f;
+            }
+        }
+
+        for (File f : files) {
+            String lower = f.getName().toLowerCase();
+            if (!lower.contains("normal") && !lower.contains("rough") && !lower.contains("bump")) {
+                return f;
+            }
+        }
+        return null;
     }
 }
