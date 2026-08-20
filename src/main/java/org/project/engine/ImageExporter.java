@@ -24,7 +24,6 @@ public class ImageExporter
                 buffered.setRGB(x, y, reader.getArgb(x, y));
             }
         }
-
         ImageIO.write(buffered, "png", file);
     }
 }

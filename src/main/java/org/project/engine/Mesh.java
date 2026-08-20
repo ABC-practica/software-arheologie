@@ -17,6 +17,8 @@ public class Mesh
     private final float[] positions;
     private final int[] indices;
 
+    private int drawMode = GL30.GL_TRIANGLES;
+
     public Mesh(float[] positions, float[] normals, float[] texCoords, int[] indices, List<MeshPart> parts)
     {
         this.parts = parts;
@@ -69,15 +71,9 @@ public class Mesh
         MemoryUtil.memFree(indicesBuffer);
     }
 
-    public float[] getPositions()
-    {
-        return positions;
-    }
-
-    public int[] getIndices()
-    {
-        return indices;
-    }
+    public float[] getPositions() { return positions; }
+    public int[] getIndices() { return indices; }
+    public void setDrawMode(int mode) { this.drawMode = mode; }
 
     public void render()
     {
@@ -86,7 +82,7 @@ public class Mesh
         for (MeshPart part : parts)
         {
             GL30.glBindTexture(GL30.GL_TEXTURE_2D, part.textureId);
-            GL30.glDrawElements(GL30.GL_TRIANGLES, part.indexCount, GL30.GL_UNSIGNED_INT, part.indexOffset * 4L);
+            GL30.glDrawElements(drawMode, part.indexCount, GL30.GL_UNSIGNED_INT, part.indexOffset * 4L);
         }
         GL30.glBindVertexArray(0);
     }

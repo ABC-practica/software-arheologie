@@ -10,6 +10,7 @@ import javafx.scene.image.WritableImage;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
+import javafx.stage.DirectoryChooser;
 import javafx.stage.Popup;
 import javafx.stage.Stage;
 import org.project.engine.*;
@@ -34,7 +35,6 @@ public class MainController
     private Thread renderThread;
 
     private OpenGLRenderer currentRenderer;
-    private int nextObjectId = 1;
     private double lastMouseX = 0;
     private double lastMouseY = 0;
     private double lastClickScreenX = 0;
@@ -46,7 +46,7 @@ public class MainController
     private void handleFileUpload(ActionEvent event)
     {
         FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Alege un fișier 3D");
+        fileChooser.setTitle("Alege un fisier 3D");
         fileChooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("Modele 3D", "*.gltf", "*.glb", "*.obj")
         );
@@ -54,7 +54,21 @@ public class MainController
         File selectedFile = fileChooser.showOpenDialog(stage);
         if (selectedFile != null)
         {
-            startRenderEngine(selectedFile.getAbsolutePath());
+            initEngineIfNeeded();
+            currentRenderer.queueModelLoad(selectedFile.getAbsolutePath());
+        }
+    }
+
+    @FXML
+    private void handleSectionUpload(ActionEvent event)
+    {
+        DirectoryChooser dirChooser = new DirectoryChooser();
+        dirChooser.setTitle("Alege Folderul Sectiunii Arheologice");
+        Stage stage = (Stage) canvasPlaceholder.getScene().getWindow();
+        File selectedDir = dirChooser.showDialog(stage);
+        if (selectedDir != null) {
+            initEngineIfNeeded();
+            currentRenderer.queueSectionLoad(selectedDir);
         }
     }
 
@@ -75,6 +89,7 @@ public class MainController
         if (currentRenderer != null) {
             currentRenderer.objects.clear();
             selectionPopup.hide();
+            SessionDatabase.clear();
             for (Stage stage : openObjectWindows.values()) {
                 stage.close();
             }
@@ -86,12 +101,12 @@ public class MainController
     private void handleShowControls(ActionEvent event) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
         alert.setTitle("Control Vizualizator 3D");
-        alert.setHeaderText("Instrucțiuni de manipulare");
-        alert.setContentText("• Click Stanga + Tragere pe ecran: Roteste obiectul selectat (Rotate).\n\n"
-                + "• Click Dreapta + Tragere pe ecran: Muta obiectul (Pan).\n\n"
+        alert.setHeaderText("Instructiuni de manipulare");
+        alert.setContentText("• CTRL + Click: Selecteaza mai multe fragmente simultan.\n\n"
+                + "• Click Stanga + Tragere: Roteste obiectul selectat (Rotate).\n\n"
+                + "• Click Dreapta + Tragere: Muta obiectul (Pan).\n\n"
                 + "• Rotita Mouse: Mareste sau micsoreaza obiectul (Zoom).\n\n"
-                + "• Click pe model: Selecteaza modelul (se va evidentia cu rosu).\n\n"
-                + "• Click pe fundalul gri: Pastreaza selectia curenta pentru a putea trage mouse-ul mai usor in spatiu.");
+                + "• Click pe fundal: Pastreaza selectia curenta.");
         alert.showAndWait();
     }
 
@@ -101,16 +116,9 @@ public class MainController
         System.exit(0);
     }
 
-    private void startRenderEngine(String modelPath)
+    private void initEngineIfNeeded()
     {
-        if (renderThread != null && renderThread.isAlive())
-        {
-            if (currentRenderer != null)
-            {
-                currentRenderer.queueModelLoad(modelPath);
-            }
-            return;
-        }
+        if (renderThread != null && renderThread.isAlive() && currentRenderer != null) return;
 
         canvasPlaceholder.getChildren().clear();
         WritableImage frameBufferImage = new WritableImage(800, 600);
@@ -127,14 +135,11 @@ public class MainController
         imageView.setOnMousePressed(event -> {
             double viewW = imageView.getLayoutBounds().getWidth();
             double viewH = imageView.getLayoutBounds().getHeight();
-
             double scale = Math.min(viewW / 800.0, viewH / 600.0);
             double actualW = 800.0 * scale;
             double actualH = 600.0 * scale;
-
             double offsetX = (viewW - actualW) / 2.0;
             double offsetY = (viewH - actualH) / 2.0;
-
             double mappedX = (event.getX() - offsetX) / scale;
             double mappedY = (event.getY() - offsetY) / scale;
 
@@ -173,13 +178,17 @@ public class MainController
         renderThread = new Thread(currentRenderer);
         renderThread.setDaemon(true);
         renderThread.start();
-
-        currentRenderer.queueModelLoad(modelPath);
     }
 
     private void onSelectionChanged(Set<Integer> objectIds)
     {
-        if (objectIds.isEmpty())
+        Set<Integer> filteredIds = new java.util.HashSet<>();
+        for (int id : objectIds) {
+            if (currentRenderer != null && !currentRenderer.isSectionObject(id)) {
+                filteredIds.add(id);
+            }
+        }
+        if (filteredIds.isEmpty())
         {
             selectionPopup.hide();
             return;
@@ -188,7 +197,7 @@ public class MainController
         VBox content = new VBox(8);
         content.setStyle("-fx-background-color: #2b2b2b; -fx-padding: 10; -fx-border-color: #555; -fx-border-width: 1; -fx-border-radius: 3; -fx-background-radius: 3;");
 
-        Label label = new Label(objectIds.size() == 1 ? "Object #" + objectIds.iterator().next() : objectIds.size() + " Fragmente Selectate");
+        Label label = new Label(filteredIds.size() == 1 ? "Object #" + filteredIds.iterator().next() : filteredIds.size() + " Fragmente Selectate");
         label.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
         Button closeBtn = new Button("X");
         closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #aaaaaa; -fx-font-weight: bold; -fx-cursor: hand;");
@@ -202,8 +211,9 @@ public class MainController
         header.setAlignment(Pos.CENTER_LEFT);
         header.setPrefWidth(180);
         content.getChildren().add(header);
-        if (objectIds.size() == 1) {
-            int singleId = objectIds.iterator().next();
+
+        if (filteredIds.size() == 1) {
+            int singleId = filteredIds.iterator().next();
 
             Button openWindowButton = new Button("Open dedicated window");
             openWindowButton.setMaxWidth(Double.MAX_VALUE);
@@ -225,35 +235,35 @@ public class MainController
             content.getChildren().addAll(openWindowButton, deleteButton);
         }
         else {
-            Button generateButton = new Button("Genereaza Vas");
+            Button generateButton = new Button("Genereaza Vas \u2728");
             generateButton.setStyle("-fx-background-color: #0078D7; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
             generateButton.setMaxWidth(Double.MAX_VALUE);
             generateButton.setOnAction(e -> {
                 try {
-                    for (int id : objectIds) {
+                    for (int id : filteredIds) {
                         if (!SessionDatabase.hasSection(id)) {
-                            throw new IllegalStateException("Fragmentul cu ID-ul #" + id + " nu are secțiunea definită!");
+                            throw new IllegalStateException("Fragmentul cu ID-ul #" + id + " nu are sectiunea definita!");
                         }
                     }
                     selectionPopup.hide();
-                    simulateAIRestoration(objectIds);
+                    simulateAIRestoration(filteredIds);
 
                 } catch (IllegalStateException ex) {
                     Alert alert = new Alert(Alert.AlertType.ERROR);
                     alert.setTitle("Eroare de Validare");
-                    alert.setHeaderText("Acțiune respinsă: Secțiuni lipsă");
-                    alert.setContentText(ex.getMessage() + "\n\nTe rugăm să deschizi fereastra dedicată pentru acest obiect și să salvezi o secțiune.");
+                    alert.setHeaderText("Actiune respinsa: Sectiuni lipsa");
+                    alert.setContentText(ex.getMessage() + "\n\nTe rugam sa deschizi fereastra dedicata pentru acest obiect si sa salvezi o sectiune.");
                     alert.showAndWait();
                 }
             });
 
-            Button deleteAllButton = new Button("Șterge Selecția");
+            Button deleteAllButton = new Button("Sterge Selectia");
             deleteAllButton.setMaxWidth(Double.MAX_VALUE);
             deleteAllButton.setStyle("-fx-background-color: #d9534f; -fx-text-fill: white; -fx-cursor: hand;");
             deleteAllButton.setOnAction(e -> {
                 selectionPopup.hide();
                 if (currentRenderer != null) {
-                    for (int id : objectIds) {
+                    for (int id : filteredIds) {
                         currentRenderer.queueDeleteObject(id);
                         Stage dedicatedWindow = openObjectWindows.remove(id);
                         if (dedicatedWindow != null) dedicatedWindow.close();
@@ -272,12 +282,12 @@ public class MainController
     private void simulateAIRestoration(Set<Integer> objectIds) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
         alert.setTitle("Comunicare AI Backend");
-        alert.setHeaderText("Trimitere date către AI");
-        alert.setContentText("Datele extrase pentru cele " + objectIds.size() + " fragmente sunt corecte.\n\nSimulăm procesarea... Te rugăm să selectezi modelul 3D pe care l-ar fi generat AI-ul pentru a fi afișat.");
+        alert.setHeaderText("Trimitere date catre AI");
+        alert.setContentText("Datele extrase pentru cele " + objectIds.size() + " fragmente sunt complete.\n\nSimulam procesarea... Te rugam sa selectezi modelul 3D pe care l-ar fi generat AI-ul pentru a fi afisat.");
         alert.showAndWait();
 
         FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Recepție Model AI - Alege Vaza Restaurată");
+        fileChooser.setTitle("Receptie Model AI - Alege Vaza Restaurata");
         fileChooser.getExtensionFilters().addAll(
                 new FileChooser.ExtensionFilter("Modele 3D", "*.gltf", "*.glb", "*.obj")
         );
@@ -322,7 +332,7 @@ public class MainController
         renderThread.start();
 
         Stage vaseStage = new Stage();
-        vaseStage.setTitle("Rezultat Reconstrucție AI \u2728");
+        vaseStage.setTitle("Rezultat Reconstructie AI \u2728");
         vaseStage.setScene(new Scene(root, viewSize, viewSize));
         vaseStage.setOnCloseRequest(e -> renderThread.interrupt());
         vaseStage.show();
@@ -372,6 +382,20 @@ public class MainController
         });
         imageView.setOnScroll(event -> objectRenderer.scale((float) event.getDeltaY() * 0.005f));
 
+        Label fileLabel = new Label("Fișier: " + new File(target.getSourcePath()).getName());
+        fileLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14px;");
+
+        Label posLabel = new Label(String.format("Poziție  —  X: %.2f  |  Y: %.2f  |  Z: %.2f",
+                target.position.x, target.position.y, target.position.z));
+        posLabel.setStyle("-fx-text-fill: #cccccc;");
+
+        Label rotLabel = new Label(String.format("Rotație  —  X: %.1f°  |  Y: %.1f°  |  Z: %.1f°",
+                Math.toDegrees(target.rotation.x), Math.toDegrees(target.rotation.y), Math.toDegrees(target.rotation.z)));
+        rotLabel.setStyle("-fx-text-fill: #cccccc;");
+
+        VBox infoBox = new VBox(6, fileLabel, posLabel, rotLabel);
+        infoBox.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
+
         Button computeButton = new Button("Calculeaza curbura");
         computeButton.setStyle("-fx-background-color: #0078D7; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
         computeButton.setMaxWidth(Double.MAX_VALUE);
@@ -420,7 +444,7 @@ public class MainController
                 cutButton, captureTopViewButton);
         crossSectionControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
-        VBox controls = new VBox(15, curvatureControls, crossSectionControls);
+        VBox controls = new VBox(15, infoBox, curvatureControls, crossSectionControls);
         controls.setStyle("-fx-padding: 15; -fx-background-color: #2b2b2b;");
 
         ScrollPane scrollPane = new ScrollPane(controls);

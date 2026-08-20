@@ -13,6 +13,9 @@ public class SceneObject
     public Vector3f rotation = new Vector3f(0, 0, 0);
     public float scale = 1.0f;
 
+    public SceneObject parent = null;
+    public boolean isSectionBox = false;
+
     public SceneObject(int id, Mesh mesh, String sourcePath)
     {
         this.id = id;
@@ -20,20 +23,9 @@ public class SceneObject
         this.sourcePath = sourcePath;
     }
 
-    public int getId()
-    {
-        return id;
-    }
-
-    public Mesh getMesh()
-    {
-        return mesh;
-    }
-
-    public String getSourcePath()
-    {
-        return sourcePath;
-    }
+    public int getId() { return id; }
+    public Mesh getMesh() { return mesh; }
+    public String getSourcePath() { return sourcePath; }
 
     public Vector3f getPickingColor()
     {
@@ -45,11 +37,16 @@ public class SceneObject
 
     public Matrix4f getModelMatrix()
     {
-        return new Matrix4f().identity()
+        Matrix4f localMat = new Matrix4f().identity()
                 .translate(position)
                 .rotateX(rotation.x)
                 .rotateY(rotation.y)
                 .rotateZ(rotation.z)
                 .scale(scale);
+
+        if (parent != null) {
+            return parent.getModelMatrix().mul(localMat);
+        }
+        return localMat;
     }
 }

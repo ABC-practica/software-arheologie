@@ -10,7 +10,8 @@
             <menus>
                 <Menu mnemonicParsing="false" text="Fisier">
                     <items>
-                        <MenuItem mnemonicParsing="false" onAction="#handleFileUpload" text="Incarca model 3D" />
+                        <MenuItem mnemonicParsing="false" onAction="#handleFileUpload" text="Incarca model individual 3D" />
+                        <MenuItem mnemonicParsing="false" onAction="#handleSectionUpload" text="Incarca Sectiune" />
                         <SeparatorMenuItem mnemonicParsing="false" />
                         <MenuItem mnemonicParsing="false" onAction="#handleExit" text="Iesire" />
                     </items>
@@ -38,7 +39,7 @@
                             <Font name="System Bold" size="26.0" />
                         </font>
                     </Label>
-                    <Label text="Foloseste meniul Fisier -> Incarca Model 3D pentru a adauga fragmente" textFill="#666666">
+                    <Label text="Foloseste meniul Fisier pentru a adauga fragmente sau sectiuni" textFill="#666666">
                         <font>
                             <Font size="14.0" />
                         </font>
