@@ -20,6 +20,10 @@ public class SessionDatabase
         return crossSections.get(objectId);
     }
 
+    public static void removeSection(int objectId) {
+        crossSections.remove(objectId);
+    }
+
     public static void clear() {
         crossSections.clear();
     }

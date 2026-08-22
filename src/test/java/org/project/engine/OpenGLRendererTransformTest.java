@@ -2,8 +2,6 @@ package org.project.engine;
 
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 // move/rotate/scaleSelectedObject nu ating deloc GL - doar muta campuri pe
@@ -12,9 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 // un Mesh null fara probleme (nu-l foloseste in metodele astea) - Mesh real nu
 // poate fi construit fara context GL, deci null e singura varianta testabila.
 //
-// selectedObjectId nu are setter public (se seteaza doar din picking, in run()),
-// asa ca il setam prin reflectie in loc sa adaugam un seam nou in codul de
-// productie chiar acum (colegul lucreaza pe partea de sesiune/selectie).
+// selectedObjectIds nu are setter public (se populeaza doar din picking, in
+// run()), dar getSelectedObjectIds() intoarce referinta directa catre Set-ul
+// intern, deci il putem popula direct din test fara reflectie sau alt seam nou.
 class OpenGLRendererTransformTest
 {
     @Test
@@ -174,15 +172,6 @@ class OpenGLRendererTransformTest
 
     private static void setSelectedObjectId(OpenGLRenderer renderer, int objectId)
     {
-        try
-        {
-            Field field = OpenGLRenderer.class.getDeclaredField("selectedObjectId");
-            field.setAccessible(true);
-            field.setInt(renderer, objectId);
-        }
-        catch (ReflectiveOperationException e)
-        {
-            throw new RuntimeException(e);
-        }
+        renderer.getSelectedObjectIds().add(objectId);
     }
 }

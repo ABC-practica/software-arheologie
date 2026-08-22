@@ -202,18 +202,7 @@ public class OpenGLRenderer implements Runnable
                     } catch (Exception e) { e.printStackTrace(); }
                 }
 
-                Integer deleteId;
-                while ((deleteId = pendingDeletions.poll()) != null) {
-                    final int idToRemove = deleteId;
-                    objects.removeIf(obj -> obj.getId() == idToRemove);
-                    if (selectedObjectIds.contains(idToRemove)) {
-                        selectedObjectIds.remove(idToRemove);
-                        if (onSelectionChanged != null) {
-                            Set<Integer> copy = new HashSet<>(selectedObjectIds);
-                            Platform.runLater(() -> onSelectionChanged.accept(copy));
-                        }
-                    }
-                }
+                processPendingDeletions();
 
                 GL30.glClearColor(0.16f, 0.16f, 0.16f, 1.0f);
                 GL30.glClear(GL30.GL_COLOR_BUFFER_BIT | GL30.GL_DEPTH_BUFFER_BIT);
@@ -294,6 +283,22 @@ public class OpenGLRenderer implements Runnable
         }
     }
 
+    void processPendingDeletions() {
+        Integer deleteId;
+        while ((deleteId = pendingDeletions.poll()) != null) {
+            final int idToRemove = deleteId;
+            objects.removeIf(obj -> obj.getId() == idToRemove);
+            SessionDatabase.removeSection(idToRemove);
+            if (selectedObjectIds.contains(idToRemove)) {
+                selectedObjectIds.remove(idToRemove);
+                if (onSelectionChanged != null) {
+                    Set<Integer> copy = new HashSet<>(selectedObjectIds);
+                    Platform.runLater(() -> onSelectionChanged.accept(copy));
+                }
+            }
+        }
+    }
+
     public void moveSelectedObject(float deltaX, float deltaY) {
         if (selectedObjectIds.isEmpty()) return;
         for (SceneObject obj : objects) {
@@ -302,6 +307,11 @@ public class OpenGLRenderer implements Runnable
 
                 obj.position.x += deltaX * 0.01f;
                 obj.position.y += deltaY * 0.01f;
+
+                if (obj.position.x > 2.7f) obj.position.x = 2.7f;
+                if (obj.position.x < -2.7f) obj.position.x = -2.7f;
+                if (obj.position.y > 2.0f) obj.position.y = 2.0f;
+                if (obj.position.y < -2.0f) obj.position.y = -2.0f;
             }
         }
     }
