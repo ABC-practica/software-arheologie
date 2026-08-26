@@ -75,11 +75,17 @@ public class MainController
     @FXML
     private void handleResetScene(ActionEvent event) {
         if (currentRenderer != null) {
-            for (int i = 0; i < currentRenderer.objects.size(); i++) {
-                SceneObject obj = currentRenderer.objects.get(i);
-                obj.position.set(i * 3.5f, 0, 0);
-                obj.rotation.set((float) Math.toRadians(-90.0f), 0, 0);
-                obj.scale = 1.0f;
+            for (SceneObject obj : currentRenderer.objects) {
+                if (obj.parent != null) continue;
+
+                obj.position.set(0, 0, 0);
+                obj.rotation.set(0, 0, 0);
+
+                if (obj.isSectionBox) {
+                    obj.scale = 0.35f;
+                } else {
+                    obj.scale = 1.0f;
+                }
             }
         }
     }
@@ -88,6 +94,7 @@ public class MainController
     private void handleClearScene(ActionEvent event) {
         if (currentRenderer != null) {
             currentRenderer.objects.clear();
+            currentRenderer.clearSelection();
             selectionPopup.hide();
             SessionDatabase.clear();
             for (Stage stage : openObjectWindows.values()) {
@@ -103,9 +110,9 @@ public class MainController
         alert.setTitle("Control Vizualizator 3D");
         alert.setHeaderText("Instructiuni de manipulare");
         alert.setContentText("• CTRL + Click: Selecteaza mai multe fragmente simultan.\n\n"
-                + "• Click Stanga + Tragere: Roteste obiectul selectat (Rotate).\n\n"
-                + "• Click Dreapta + Tragere: Muta obiectul (Pan).\n\n"
-                + "• Rotita Mouse: Mareste sau micsoreaza obiectul (Zoom).\n\n"
+                + "• Click Stanga + Tragere: Roteste obiectul selectat.\n\n"
+                + "• Click Dreapta + Tragere: Muta obiectul.\n\n"
+                + "• Rotita Mouse: Scaleaza obiectul.\n\n"
                 + "• Click pe fundal: Pastreaza selectia curenta.");
         alert.showAndWait();
     }
@@ -197,11 +204,14 @@ public class MainController
         VBox content = new VBox(8);
         content.setStyle("-fx-background-color: #2b2b2b; -fx-padding: 10; -fx-border-color: #555; -fx-border-width: 1; -fx-border-radius: 3; -fx-background-radius: 3;");
 
-        Label label = new Label(filteredIds.size() == 1 ? "Object #" + filteredIds.iterator().next() : filteredIds.size() + " Fragmente Selectate");
+        Label label = new Label(filteredIds.size() == 1 ? "Obiect #" + filteredIds.iterator().next() : filteredIds.size() + " Fragmente Selectate");
         label.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
         Button closeBtn = new Button("X");
         closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #aaaaaa; -fx-font-weight: bold; -fx-cursor: hand;");
-        closeBtn.setOnAction(e -> selectionPopup.hide());
+        closeBtn.setOnAction(e -> {
+            selectionPopup.hide();
+            if (currentRenderer != null) currentRenderer.clearSelection();
+        });
         closeBtn.setOnMouseEntered(e -> closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;"));
         closeBtn.setOnMouseExited(e -> closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #aaaaaa; -fx-font-weight: bold; -fx-cursor: hand;"));
         Region spacer = new Region();
@@ -215,14 +225,22 @@ public class MainController
         if (filteredIds.size() == 1) {
             int singleId = filteredIds.iterator().next();
 
-            Button openWindowButton = new Button("Open dedicated window");
+            Button openWindowButton = new Button("Deschide fereastra");
             openWindowButton.setMaxWidth(Double.MAX_VALUE);
             openWindowButton.setOnAction(e -> {
                 selectionPopup.hide();
                 openObjectWindow(singleId);
             });
 
-            Button deleteButton = new Button("Delete Object");
+            Button deselectButton = new Button("Deselecteaza");
+            deselectButton.setMaxWidth(Double.MAX_VALUE);
+            deselectButton.setStyle("-fx-background-color: #6c757d; -fx-text-fill: white; -fx-cursor: hand;");
+            deselectButton.setOnAction(e -> {
+                selectionPopup.hide();
+                if (currentRenderer != null) currentRenderer.clearSelection();
+            });
+
+            Button deleteButton = new Button("Sterge obiectul");
             deleteButton.setMaxWidth(Double.MAX_VALUE);
             deleteButton.setStyle("-fx-background-color: #d9534f; -fx-text-fill: white; -fx-cursor: hand;");
             deleteButton.setOnAction(e -> {
@@ -232,10 +250,10 @@ public class MainController
                 if (dedicatedWindow != null) dedicatedWindow.close();
             });
 
-            content.getChildren().addAll(openWindowButton, deleteButton);
+            content.getChildren().addAll(openWindowButton, deselectButton, deleteButton);
         }
         else {
-            Button generateButton = new Button("Genereaza Vas \u2728");
+            Button generateButton = new Button("Genereaza Vas");
             generateButton.setStyle("-fx-background-color: #0078D7; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
             generateButton.setMaxWidth(Double.MAX_VALUE);
             generateButton.setOnAction(e -> {
@@ -257,6 +275,14 @@ public class MainController
                 }
             });
 
+            Button deselectButton = new Button("Deselecteaza");
+            deselectButton.setMaxWidth(Double.MAX_VALUE);
+            deselectButton.setStyle("-fx-background-color: #6c757d; -fx-text-fill: white; -fx-cursor: hand;");
+            deselectButton.setOnAction(e -> {
+                selectionPopup.hide();
+                if (currentRenderer != null) currentRenderer.clearSelection();
+            });
+
             Button deleteAllButton = new Button("Sterge Selectia");
             deleteAllButton.setMaxWidth(Double.MAX_VALUE);
             deleteAllButton.setStyle("-fx-background-color: #d9534f; -fx-text-fill: white; -fx-cursor: hand;");
@@ -271,7 +297,7 @@ public class MainController
                 }
             });
 
-            content.getChildren().addAll(generateButton, deleteAllButton);
+            content.getChildren().addAll(generateButton, deselectButton, deleteAllButton);
         }
 
         selectionPopup.getContent().setAll(content);
@@ -309,7 +335,6 @@ public class MainController
         imageView.setPreserveRatio(true);
 
         SingleObjectRenderer vaseRenderer = new SingleObjectRenderer(modelPath, frameBufferImage, viewSize, viewSize);
-        vaseRenderer.setCrossSectionThickness(0.0f);
 
         double[] lastX = {0};
         double[] lastY = {0};
@@ -332,7 +357,7 @@ public class MainController
         renderThread.start();
 
         Stage vaseStage = new Stage();
-        vaseStage.setTitle("Rezultat Reconstructie AI \u2728");
+        vaseStage.setTitle("Rezultat Reconstructie AI");
         vaseStage.setScene(new Scene(root, viewSize, viewSize));
         vaseStage.setOnCloseRequest(e -> renderThread.interrupt());
         vaseStage.show();
@@ -367,6 +392,7 @@ public class MainController
         imageView.setPreserveRatio(true);
 
         SingleObjectRenderer objectRenderer = new SingleObjectRenderer(target.getSourcePath(), frameBufferImage, viewSize, viewSize);
+
         objectRenderer.setOnTopViewCaptured(image -> openTopViewPreview(objectId, image));
 
         double[] lastX = {0};
@@ -375,6 +401,7 @@ public class MainController
             lastX[0] = event.getX();
             lastY[0] = event.getY();
         });
+
         imageView.setOnMouseDragged(event -> {
             objectRenderer.rotate((float) (event.getX() - lastX[0]), (float) (event.getY() - lastY[0]));
             lastX[0] = event.getX();
@@ -382,14 +409,14 @@ public class MainController
         });
         imageView.setOnScroll(event -> objectRenderer.scale((float) event.getDeltaY() * 0.005f));
 
-        Label fileLabel = new Label("Fișier: " + new File(target.getSourcePath()).getName());
+        Label fileLabel = new Label("Fisier: " + new File(target.getSourcePath()).getName());
         fileLabel.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14px;");
 
-        Label posLabel = new Label(String.format("Poziție  —  X: %.2f  |  Y: %.2f  |  Z: %.2f",
+        Label posLabel = new Label(String.format("Pozitie  —  X: %.2f  |  Y: %.2f  |  Z: %.2f",
                 target.position.x, target.position.y, target.position.z));
         posLabel.setStyle("-fx-text-fill: #cccccc;");
 
-        Label rotLabel = new Label(String.format("Rotație  —  X: %.1f°  |  Y: %.1f°  |  Z: %.1f°",
+        Label rotLabel = new Label(String.format("Rotatie  —  X: %.1f°  |  Y: %.1f°  |  Z: %.1f°",
                 Math.toDegrees(target.rotation.x), Math.toDegrees(target.rotation.y), Math.toDegrees(target.rotation.z)));
         rotLabel.setStyle("-fx-text-fill: #cccccc;");
 
@@ -399,14 +426,38 @@ public class MainController
         Button computeButton = new Button("Calculeaza curbura");
         computeButton.setStyle("-fx-background-color: #0078D7; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
         computeButton.setMaxWidth(Double.MAX_VALUE);
-        computeButton.setOnAction(e -> objectRenderer.requestComputeCurvature());
+
+        CheckBox extCheck = new CheckBox("Curbura interioara");
+        extCheck.setDisable(true);
+        extCheck.setStyle("-fx-text-fill: white;");
+        extCheck.setOnAction(e -> objectRenderer.setShowExterior(extCheck.isSelected()));
+
+        CheckBox intCheck = new CheckBox("Curbura exterioara");
+        intCheck.setDisable(true);
+        intCheck.setStyle("-fx-text-fill: white;");
+        intCheck.setOnAction(e -> objectRenderer.setShowInterior(intCheck.isSelected()));
+
+        Label widthLabel = new Label("Latime estimata: Nedeterminat");
+        widthLabel.setStyle("-fx-text-fill: #ffcc00; -fx-font-weight: bold;");
+
+        computeButton.setOnAction(e -> {
+            computeButton.setText("Se calculeaza...");
+            computeButton.setDisable(true);
+            objectRenderer.requestComputeCurvature();
+        });
+
+        objectRenderer.setOnCurvatureComputed(result -> {
+            computeButton.setText("Curbura calculata");
+            extCheck.setDisable(false);
+            intCheck.setDisable(false);
+
+            float distance = result.exteriorPlanePoint.distance(result.interiorPlanePoint);
+            widthLabel.setText(String.format("Latime estimata: %.3f unitati", distance));
+        });
 
         Slider yawSlider = new Slider(0, 360, 0);
         Slider pitchSlider = new Slider(-89, 89, 0);
         Slider offsetSlider = new Slider(-2.5, 2.5, 0);
-        Slider thicknessSlider = new Slider(0, 1.5, 0.0);
-
-        objectRenderer.setCrossSectionThickness(0.0f);
 
         yawSlider.valueProperty().addListener((obs, oldVal, newVal) ->
                 objectRenderer.setCrossSectionYaw((float) Math.toRadians(newVal.doubleValue())));
@@ -414,34 +465,27 @@ public class MainController
                 objectRenderer.setCrossSectionPitch((float) Math.toRadians(newVal.doubleValue())));
         offsetSlider.valueProperty().addListener((obs, oldVal, newVal) ->
                 objectRenderer.setCrossSectionOffset(newVal.floatValue()));
-        thicknessSlider.valueProperty().addListener((obs, oldVal, newVal) ->
-                objectRenderer.setCrossSectionThickness(newVal.floatValue()));
 
-        Button cutButton = new Button("Decupeaza sectiune");
+        Button cutButton = new Button("Decupeaza si Previzualizeaza");
         cutButton.setStyle("-fx-background-color: #28a745; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
         cutButton.setMaxWidth(Double.MAX_VALUE);
-        cutButton.setOnAction(e -> objectRenderer.requestComputeCrossSection());
+        cutButton.setOnAction(e -> {
+            objectRenderer.requestComputeCrossSection();
+            objectRenderer.requestTopViewCapture();
+        });
 
-        Button captureTopViewButton = new Button("Vedere de sus a sectiunii");
-        captureTopViewButton.setStyle("-fx-background-color: #6f42c1; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
-        captureTopViewButton.setMaxWidth(Double.MAX_VALUE);
-        objectRenderer.setOnTopViewCaptured(image -> openTopViewPreview(objectId, image));
-        captureTopViewButton.setOnAction(e -> objectRenderer.requestTopViewCapture());
+        Label l1 = new Label("Sectiune 2D orizontala"); l1.setStyle("-fx-text-fill: white;");
+        Label l2 = new Label("Sectiune verticala"); l2.setStyle("-fx-text-fill: white;");
+        Label l3 = new Label("Pozitie plan"); l3.setStyle("-fx-text-fill: white;");
 
-        Label l1 = new Label("Secțiune 2D — unghi orizontal"); l1.setStyle("-fx-text-fill: white;");
-        Label l2 = new Label("Unghi vertical"); l2.setStyle("-fx-text-fill: white;");
-        Label l3 = new Label("Poziție plan"); l3.setStyle("-fx-text-fill: white;");
-        Label l4 = new Label("Grosime plan"); l4.setStyle("-fx-text-fill: white;");
-
-        VBox curvatureControls = new VBox(8, computeButton);
+        VBox curvatureControls = new VBox(8, computeButton, extCheck, intCheck, widthLabel);
         curvatureControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
         VBox crossSectionControls = new VBox(8,
                 l1, yawSlider,
                 l2, pitchSlider,
                 l3, offsetSlider,
-                l4, thicknessSlider,
-                cutButton, captureTopViewButton);
+                cutButton);
         crossSectionControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
         VBox controls = new VBox(15, infoBox, curvatureControls, crossSectionControls);
@@ -472,6 +516,9 @@ public class MainController
         objectStage.setOnCloseRequest(e -> {
             objectRenderThread.interrupt();
             openObjectWindows.remove(objectId);
+            if (currentRenderer != null) {
+                currentRenderer.clearSelection();
+            }
         });
         objectStage.show();
 
@@ -486,13 +533,12 @@ public class MainController
         previewView.setPreserveRatio(true);
 
         Stage previewStage = new Stage();
-        previewStage.setTitle("Previzualizare sectiune");
+        previewStage.setTitle("Previzualizare Sectiune");
 
-        Button saveToDbButton = new Button("Salveaza Sectiunea pentru AI");
+        Button saveToDbButton = new Button("Salveaza pentru AI");
         saveToDbButton.setStyle("-fx-background-color: #0078D7; -fx-text-fill: white; -fx-font-weight: bold;");
         saveToDbButton.setOnAction(e -> {
             SessionDatabase.saveSection(objectId, image);
-            System.out.println("Sectiune salvata in memorie pentru obiectul #" + objectId);
             previewStage.close();
         });
 

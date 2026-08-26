@@ -35,10 +35,6 @@ public class OpenGLRenderer implements Runnable
     private final ConcurrentLinkedQueue<Integer> pendingDeletions = new ConcurrentLinkedQueue<>();
     private int nextObjectId = 1;
 
-    public void queueModelLoad(String filePath) { pendingModels.add(filePath); }
-    public void queueSectionLoad(File folder) { pendingSections.add(folder); }
-    public void queueDeleteObject(int objectId) { pendingDeletions.add(objectId); }
-
     private volatile boolean mouseClicked = false;
     private volatile int clickX = 0;
     private volatile int clickY = 0;
@@ -52,8 +48,11 @@ public class OpenGLRenderer implements Runnable
         this.fxImage = fxImage;
     }
 
-    public void registerClick(int x, int y, boolean multiSelect)
-    {
+    public void queueModelLoad(String filePath) { pendingModels.add(filePath); }
+    public void queueSectionLoad(File folder) { pendingSections.add(folder); }
+    public void queueDeleteObject(int objectId) { pendingDeletions.add(objectId); }
+
+    public void registerClick(int x, int y, boolean multiSelect) {
         this.clickX = x;
         this.clickY = y;
         this.multiSelectModifier = multiSelect;
@@ -61,11 +60,8 @@ public class OpenGLRenderer implements Runnable
     }
 
     public Set<Integer> getSelectedObjectIds() { return selectedObjectIds; }
+    public void setOnSelectionChanged(Consumer<Set<Integer>> callback) { this.onSelectionChanged = callback; }
 
-    public void setOnSelectionChanged(Consumer<Set<Integer>> callback)
-    {
-        this.onSelectionChanged = callback;
-    }
     public boolean isSectionObject(int id) {
         for (SceneObject obj : objects) {
             if (obj.getId() == id) {
@@ -73,6 +69,13 @@ public class OpenGLRenderer implements Runnable
             }
         }
         return false;
+    }
+
+    public void clearSelection() {
+        selectedObjectIds.clear();
+        if (onSelectionChanged != null) {
+            Platform.runLater(() -> onSelectionChanged.accept(new HashSet<>()));
+        }
     }
 
     @Override
@@ -185,7 +188,6 @@ public class OpenGLRenderer implements Runnable
 
                                 File objFile = new File(sectionFolder, filename);
                                 if (!objFile.exists()) {
-                                    System.err.println("Fisier negasit, sarim peste: " + objFile.getAbsolutePath());
                                     continue;
                                 }
 
@@ -215,8 +217,17 @@ public class OpenGLRenderer implements Runnable
                     shader.setUniform("model", obj.getModelMatrix());
                     shader.setUniform("objectIdColor", obj.getPickingColor());
                     shader.setUniform("isSelected", selectedObjectIds.contains(obj.getId()) ? 1 : 0);
+
+                    if (obj.isSectionBox) {
+                        GL30.glPolygonMode(GL30.GL_FRONT_AND_BACK, GL30.GL_LINE);
+                        GL30.glLineWidth(2.0f);
+                    } else {
+                        GL30.glPolygonMode(GL30.GL_FRONT_AND_BACK, GL30.GL_FILL);
+                    }
+
                     obj.getMesh().render();
                 }
+                GL30.glPolygonMode(GL30.GL_FRONT_AND_BACK, GL30.GL_FILL);
 
                 if (mouseClicked) {
                     mouseClicked = false;
@@ -231,8 +242,7 @@ public class OpenGLRenderer implements Runnable
                     int newSelection = (pickedId == 0 || pickedId == 2697513) ? -1 : pickedId;
                     boolean changed = false;
 
-                    if (newSelection != -1)
-                    {
+                    if (newSelection != -1) {
                         for (SceneObject o : objects) {
                             if (o.getId() == newSelection && "MARKER_NW".equals(o.getSourcePath()) && o.parent != null) {
                                 newSelection = o.parent.getId();
@@ -243,17 +253,13 @@ public class OpenGLRenderer implements Runnable
                         if (multiSelectModifier) {
                             if (selectedObjectIds.contains(newSelection)) selectedObjectIds.remove(newSelection);
                             else selectedObjectIds.add(newSelection);
+                            changed = true;
                         } else {
-                            if (selectedObjectIds.size() != 1 || !selectedObjectIds.contains(newSelection)) {
+                            if (!selectedObjectIds.contains(newSelection)) {
                                 selectedObjectIds.clear();
                                 selectedObjectIds.add(newSelection);
+                                changed = true;
                             }
-                        }
-                        changed = true;
-                    } else {
-                        if (!multiSelectModifier && !selectedObjectIds.isEmpty()) {
-                            selectedObjectIds.clear();
-                            changed = true;
                         }
                     }
 
@@ -304,14 +310,8 @@ public class OpenGLRenderer implements Runnable
         for (SceneObject obj : objects) {
             if (selectedObjectIds.contains(obj.getId())) {
                 if (obj.parent != null) continue;
-
                 obj.position.x += deltaX * 0.01f;
                 obj.position.y += deltaY * 0.01f;
-
-                if (obj.position.x > 2.7f) obj.position.x = 2.7f;
-                if (obj.position.x < -2.7f) obj.position.x = -2.7f;
-                if (obj.position.y > 2.0f) obj.position.y = 2.0f;
-                if (obj.position.y < -2.0f) obj.position.y = -2.0f;
             }
         }
     }
@@ -321,7 +321,6 @@ public class OpenGLRenderer implements Runnable
         for (SceneObject obj : objects) {
             if (selectedObjectIds.contains(obj.getId())) {
                 if (obj.parent != null) continue;
-
                 obj.rotation.y -= deltaX * 0.01f;
                 obj.rotation.x -= deltaY * 0.01f;
             }
@@ -333,7 +332,6 @@ public class OpenGLRenderer implements Runnable
         for (SceneObject obj : objects) {
             if (selectedObjectIds.contains(obj.getId())) {
                 if (obj.parent != null) continue;
-
                 obj.scale += delta;
                 if (obj.scale < 0.05f) obj.scale = 0.05f;
             }
