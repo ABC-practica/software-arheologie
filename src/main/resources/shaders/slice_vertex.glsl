@@ -6,15 +6,13 @@ uniform mat4 view;
 uniform mat4 projection;
 
 uniform vec3 sliceNormal;
-uniform vec3 sliceNearPoint;
-uniform vec3 sliceFarPoint;
+uniform vec3 slicePoint;
 
-out float gl_ClipDistance[2];
+out float gl_ClipDistance[1];
 
 void main()
 {
     vec3 worldPos = (model * vec4(aPos, 1.0)).xyz;
-    gl_ClipDistance[0] = dot(worldPos - sliceNearPoint, sliceNormal);
-    gl_ClipDistance[1] = dot(sliceFarPoint - worldPos, sliceNormal);
+    gl_ClipDistance[0] = -dot(worldPos - slicePoint, sliceNormal);
     gl_Position = projection * view * vec4(worldPos, 1.0);
 }
