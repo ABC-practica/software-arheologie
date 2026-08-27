@@ -488,7 +488,21 @@ public class MainController
                 cutButton);
         crossSectionControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
-        VBox controls = new VBox(15, infoBox, curvatureControls, crossSectionControls);
+        Button centerOfMassButton = new Button("Calculeaza centrul de greutate");
+        centerOfMassButton.setStyle("-fx-background-color: #218838; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        centerOfMassButton.setMaxWidth(Double.MAX_VALUE);
+
+        Label centerOfMassLabel = new Label();
+        centerOfMassLabel.setStyle("-fx-text-fill: #cccccc;");
+
+        centerOfMassButton.setOnAction(e -> objectRenderer.requestComputeCenterOfMass());
+        objectRenderer.setOnCenterOfMassComputed(point -> centerOfMassLabel.setText(String.format(
+                "Centru de greutate — X: %.3f | Y: %.3f | Z: %.3f", point.x, point.y, point.z)));
+
+        VBox centerOfMassControls = new VBox(8, centerOfMassButton, centerOfMassLabel);
+        centerOfMassControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
+
+        VBox controls = new VBox(15, infoBox, curvatureControls, crossSectionControls, centerOfMassControls);
         controls.setStyle("-fx-padding: 15; -fx-background-color: #2b2b2b;");
 
         ScrollPane scrollPane = new ScrollPane(controls);

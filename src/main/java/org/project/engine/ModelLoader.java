@@ -23,7 +23,80 @@ import java.util.Map;
 
 public class ModelLoader
 {
+    // Geometria pura (pozitii/normale/UV/indici), fara nimic legat de OpenGL -
+    // poate fi calculata si testata fara context GL viu (spre deosebire de
+    // Mesh, care are nevoie de un context pentru glGenVertexArrays etc.).
+    public static class Geometry
+    {
+        public final float[] positions;
+        public final float[] normals;
+        public final float[] texCoords;
+        public final int[] indices;
+
+        Geometry(float[] positions, float[] normals, float[] texCoords, int[] indices)
+        {
+            this.positions = positions;
+            this.normals = normals;
+            this.texCoords = texCoords;
+            this.indices = indices;
+        }
+    }
+
+    private static class SubMeshInfo
+    {
+        final int indexOffset;
+        final int faceCount;
+        final int materialIndex;
+        final AIMesh aiMesh;
+
+        SubMeshInfo(int indexOffset, int faceCount, int materialIndex, AIMesh aiMesh)
+        {
+            this.indexOffset = indexOffset;
+            this.faceCount = faceCount;
+            this.materialIndex = materialIndex;
+            this.aiMesh = aiMesh;
+        }
+    }
+
+    private static class ImportResult
+    {
+        final Geometry geometry;
+        final AIScene scene;
+        final List<SubMeshInfo> subMeshes;
+
+        ImportResult(Geometry geometry, AIScene scene, List<SubMeshInfo> subMeshes)
+        {
+            this.geometry = geometry;
+            this.scene = scene;
+            this.subMeshes = subMeshes;
+        }
+    }
+
+    // Punct de intrare public, fara GL - util in teste (ex. verificarea centrului
+    // de masa pe fisiere reale) unde nu exista un context OpenGL viu.
+    public static Geometry loadGeometry(String filePath)
+    {
+        return importGeometry(filePath).geometry;
+    }
+
     public static Mesh loadModel(String filePath)
+    {
+        ImportResult imported = importGeometry(filePath);
+
+        Map<Integer, Integer> textureCache = new HashMap<>();
+        List<MeshPart> parts = new ArrayList<>();
+        for (SubMeshInfo subMesh : imported.subMeshes)
+        {
+            int textureId = textureCache.computeIfAbsent(subMesh.materialIndex,
+                    key -> loadMaterialTexture(imported.scene, subMesh.aiMesh, filePath));
+            parts.add(new MeshPart(subMesh.indexOffset, subMesh.faceCount * 3, textureId));
+        }
+
+        Geometry geometry = imported.geometry;
+        return new Mesh(geometry.positions, geometry.normals, geometry.texCoords, geometry.indices, parts);
+    }
+
+    private static ImportResult importGeometry(String filePath)
     {
         AIScene scene = Assimp.aiImportFile(filePath,
                 Assimp.aiProcess_Triangulate
@@ -52,12 +125,11 @@ public class ModelLoader
         float[] normals = new float[totalVertices * 3];
         float[] texCoords = new float[totalVertices * 2];
         int[] indices = new int[totalIndices];
-        List<MeshPart> parts = new ArrayList<>();
+        List<SubMeshInfo> subMeshes = new ArrayList<>();
 
         float minX=Float.MAX_VALUE, minY=Float.MAX_VALUE, minZ=Float.MAX_VALUE;
         float maxX=-Float.MAX_VALUE, maxY=-Float.MAX_VALUE, maxZ=-Float.MAX_VALUE;
 
-        Map<Integer, Integer> textureCache = new HashMap<>();
         int vertexCursor = 0;
         int indexCursor = 0;
         for (int m = 0; m < numMeshes; m++)
@@ -115,9 +187,7 @@ public class ModelLoader
                 indices[indexCursor + i * 3 + 2] = baseVertex + face.mIndices().get(2);
             }
 
-            int materialIndex = aiMesh.mMaterialIndex();
-            int textureId = textureCache.computeIfAbsent(materialIndex, key -> loadMaterialTexture(scene, aiMesh, filePath));
-            parts.add(new MeshPart(indexCursor, faceCount * 3, textureId));
+            subMeshes.add(new SubMeshInfo(indexCursor, faceCount, aiMesh.mMaterialIndex(), aiMesh));
 
             vertexCursor += aiMesh.mNumVertices();
             indexCursor += faceCount * 3;
@@ -140,7 +210,8 @@ public class ModelLoader
             vertices[i * 3 + 2] = (vertices[i * 3 + 2] - centerZ) * scale;
         }
 
-        return new Mesh(vertices, normals, texCoords, indices, parts);
+        Geometry geometry = new Geometry(vertices, normals, texCoords, indices);
+        return new ImportResult(geometry, scene, subMeshes);
     }
 
     private static void collectMeshTransforms(AINode node, Matrix4f parentTransform, Map<Integer, Matrix4f> out)
