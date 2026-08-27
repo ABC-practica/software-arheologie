@@ -41,9 +41,11 @@ public class SingleObjectRenderer implements Runnable
     private volatile float crossSectionOffset = 0f;
     private volatile boolean crossSectionComputeRequested = true;
     private volatile boolean topViewCaptureRequested = false;
+    private volatile boolean centerOfMassRequested = false;
 
     private Consumer<CurvatureClassifier.Result> onCurvatureComputed;
     private Consumer<WritableImage> onTopViewCaptured;
+    private Consumer<Vector3f> onCenterOfMassComputed;
 
     public SingleObjectRenderer(String modelPath, WritableImage fxImage, int width, int height) {
         this.modelPath = modelPath;
@@ -82,6 +84,8 @@ public class SingleObjectRenderer implements Runnable
     public void requestComputeCrossSection() { this.crossSectionComputeRequested = true; }
     public void requestTopViewCapture() { this.topViewCaptureRequested = true; }
     public void setOnTopViewCaptured(Consumer<WritableImage> callback) { this.onTopViewCaptured = callback; }
+    public void requestComputeCenterOfMass() { this.centerOfMassRequested = true; }
+    public void setOnCenterOfMassComputed(Consumer<Vector3f> callback) { this.onCenterOfMassComputed = callback; }
 
     @Override
     public void run()
@@ -164,9 +168,18 @@ public class SingleObjectRenderer implements Runnable
         GL30.glEnableVertexAttribArray(0);
         GL30.glBindVertexArray(0);
 
+        int centerOfMassVao = GL30.glGenVertexArrays();
+        int centerOfMassVbo = GL30.glGenBuffers();
+        GL30.glBindVertexArray(centerOfMassVao);
+        GL30.glBindBuffer(GL30.GL_ARRAY_BUFFER, centerOfMassVbo);
+        GL30.glVertexAttribPointer(0, 3, GL30.GL_FLOAT, false, 0, 0);
+        GL30.glEnableVertexAttribArray(0);
+        GL30.glBindVertexArray(0);
+
         int intersectionVertexCount = 0;
         int exteriorVertexCount = 0;
         int interiorVertexCount = 0;
+        int centerOfMassVertexCount = 0;
 
         ByteBuffer pixelBuffer = MemoryUtil.memAlloc(width * height * 4);
         byte[] safePixelData = new byte[width * height * 4];
@@ -233,6 +246,20 @@ public class SingleObjectRenderer implements Runnable
                     intersectionVertexCount = linesData.length / 3;
                 }
 
+                if (centerOfMassRequested) {
+                    centerOfMassRequested = false;
+                    Vector3f centerOfMass = CenterOfMassCalculator.compute(
+                            object.getMesh().getPositions(), object.getMesh().getIndices());
+                    float[] sphereData = generateSphereTriangles(centerOfMass, 0.15f, 10, 16);
+                    uploadVertexData(centerOfMassVbo, sphereData);
+                    centerOfMassVertexCount = sphereData.length / 3;
+
+                    if (onCenterOfMassComputed != null) {
+                        Consumer<Vector3f> callback = onCenterOfMassComputed;
+                        Platform.runLater(() -> callback.accept(centerOfMass));
+                    }
+                }
+
                 shader.bind();
                 shader.setUniform("projection", projection);
                 shader.setUniform("view", view);
@@ -264,6 +291,15 @@ public class SingleObjectRenderer implements Runnable
                     GL30.glBindVertexArray(interiorVao);
                     GL30.glDrawArrays(GL30.GL_TRIANGLES, 0, interiorVertexCount);
                     GL30.glDisable(GL30.GL_POLYGON_OFFSET_FILL);
+                }
+
+                if (centerOfMassVertexCount > 0) {
+                    GL30.glDisable(GL30.GL_DEPTH_TEST);
+                    overlayShader.setUniform("color", new Vector4f(0.2f, 1.0f, 0.3f, 1.0f));
+                    overlayShader.setUniform("model", modelMat);
+                    GL30.glBindVertexArray(centerOfMassVao);
+                    GL30.glDrawArrays(GL30.GL_TRIANGLES, 0, centerOfMassVertexCount);
+                    GL30.glEnable(GL30.GL_DEPTH_TEST);
                 }
 
                 overlayShader.setUniform("model", new Matrix4f().identity());
@@ -427,6 +463,37 @@ public class SingleObjectRenderer implements Runnable
 
     private void addVert(List<Float> list, Vector3f v) {
         list.add(v.x); list.add(v.y); list.add(v.z);
+    }
+
+    private float[] generateSphereTriangles(Vector3f center, float radius, int rings, int segments) {
+        List<Float> verts = new ArrayList<>();
+        for (int r = 0; r < rings; r++) {
+            float theta1 = (float) Math.PI * r / rings;
+            float theta2 = (float) Math.PI * (r + 1) / rings;
+            for (int s = 0; s < segments; s++) {
+                float phi1 = (float) (2 * Math.PI * s / segments);
+                float phi2 = (float) (2 * Math.PI * (s + 1) / segments);
+
+                Vector3f p00 = spherePoint(center, radius, theta1, phi1);
+                Vector3f p10 = spherePoint(center, radius, theta2, phi1);
+                Vector3f p11 = spherePoint(center, radius, theta2, phi2);
+                Vector3f p01 = spherePoint(center, radius, theta1, phi2);
+
+                addVert(verts, p00); addVert(verts, p10); addVert(verts, p11);
+                addVert(verts, p00); addVert(verts, p11); addVert(verts, p01);
+            }
+        }
+        float[] array = new float[verts.size()];
+        for (int i = 0; i < array.length; i++) array[i] = verts.get(i);
+        return array;
+    }
+
+    private Vector3f spherePoint(Vector3f center, float radius, float theta, float phi) {
+        float sinTheta = (float) Math.sin(theta);
+        float x = sinTheta * (float) Math.cos(phi);
+        float y = (float) Math.cos(theta);
+        float z = sinTheta * (float) Math.sin(phi);
+        return new Vector3f(center.x + radius * x, center.y + radius * y, center.z + radius * z);
     }
 
     private static void uploadVertexData(int vbo, float[] data) {
