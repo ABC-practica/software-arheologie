@@ -139,7 +139,11 @@ public class MainController
         currentRenderer = new OpenGLRenderer(frameBufferImage);
         currentRenderer.setOnSelectionChanged(this::onSelectionChanged);
 
+        canvasPlaceholder.setFocusTraversable(true);
+
         imageView.setOnMousePressed(event -> {
+            canvasPlaceholder.requestFocus();
+
             double viewW = imageView.getLayoutBounds().getWidth();
             double viewH = imageView.getLayoutBounds().getHeight();
             double scale = Math.min(viewW / 800.0, viewH / 600.0);
@@ -306,24 +310,75 @@ public class MainController
     }
 
     private void simulateAIRestoration(Set<Integer> objectIds) {
-        Alert alert = new Alert(Alert.AlertType.INFORMATION);
-        alert.setTitle("Comunicare AI Backend");
-        alert.setHeaderText("Trimitere date catre AI");
-        alert.setContentText("Datele extrase pentru cele " + objectIds.size() + " fragmente sunt complete.\n\nSimulam procesarea... Te rugam sa selectezi modelul 3D pe care l-ar fi generat AI-ul pentru a fi afisat.");
-        alert.showAndWait();
+        Alert infoAlert = new Alert(Alert.AlertType.INFORMATION);
+        infoAlert.setTitle("Comunicare AI Backend");
+        infoAlert.setHeaderText("Trimitere date catre AI");
+        infoAlert.setContentText("Asteapta te rog, se genereaza modelul 3D...");
+        infoAlert.show();
 
-        FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Receptie Model AI - Alege Vaza Restaurata");
-        fileChooser.getExtensionFilters().addAll(
-                new FileChooser.ExtensionFilter("Modele 3D", "*.gltf", "*.glb", "*.obj")
-        );
-        Stage stage = (Stage) canvasPlaceholder.getScene().getWindow();
-        File selectedFile = fileChooser.showOpenDialog(stage);
+        new Thread(() -> {
+            try {
+                int firstId = objectIds.iterator().next();
+                WritableImage sectionImage = SessionDatabase.getSection(firstId);
 
-        if (selectedFile != null)
-        {
-            openRestoredVaseWindow(selectedFile.getAbsolutePath());
-        }
+                File tempImageFile = File.createTempFile("section_upload_", ".png");
+                ImageExporter.savePng(sectionImage, tempImageFile);
+
+                String boundary = "---Boundary" + System.currentTimeMillis();
+                byte[] fileBytes = java.nio.file.Files.readAllBytes(tempImageFile.toPath());
+
+                String header = "--" + boundary + "\r\n" +
+                        "Content-Disposition: form-data; name=\"file\"; filename=\"" + tempImageFile.getName() + "\"\r\n" +
+                        "Content-Type: image/png\r\n\r\n";
+                String footer = "\r\n--" + boundary + "--\r\n";
+
+                java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
+                outputStream.write(header.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                outputStream.write(fileBytes);
+                outputStream.write(footer.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+                java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
+                java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create("http://127.0.0.1:8000/generate-vessel"))
+                        .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                        .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray()))
+                        .build();
+
+                java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+
+                Platform.runLater(infoAlert::close);
+
+                if (response.statusCode() == 200) {
+                    File tempObjFile = File.createTempFile("restored_vessel_", ".obj");
+                    java.nio.file.Files.writeString(tempObjFile.toPath(), response.body());
+
+                    Platform.runLater(() -> {
+                        openRestoredVaseWindow(tempObjFile.getAbsolutePath());
+                    });
+                } else {
+                    Platform.runLater(() -> {
+                        Alert err = new Alert(Alert.AlertType.ERROR);
+                        err.setTitle("Eroare AI Backend");
+                        err.setHeaderText("Eroare la generare");
+                        err.setContentText("Serverul Python a returnat status: " + response.statusCode() + "\nMesaj: " + response.body());
+                        err.showAndWait();
+                    });
+                }
+
+                tempImageFile.delete();
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                Platform.runLater(() -> {
+                    infoAlert.close();
+                    Alert err = new Alert(Alert.AlertType.ERROR);
+                    err.setTitle("Eroare de Conexiune");
+                    err.setHeaderText("Nu s-a putut conecta la AI");
+                    err.setContentText("Asigura-te ca ai pornit serverul Python in fundal (pe portul 8000).");
+                    err.showAndWait();
+                });
+            }
+        }).start();
     }
 
     private void openRestoredVaseWindow(String modelPath) {
@@ -334,7 +389,7 @@ public class MainController
         imageView.setFitHeight(viewSize);
         imageView.setPreserveRatio(true);
 
-        SingleObjectRenderer vaseRenderer = new SingleObjectRenderer(modelPath, frameBufferImage, viewSize, viewSize);
+        SingleObjectRenderer vaseRenderer = new SingleObjectRenderer(modelPath, frameBufferImage, viewSize, viewSize, true);
 
         double[] lastX = {0};
         double[] lastY = {0};
@@ -391,7 +446,7 @@ public class MainController
         imageView.setFitHeight(viewSize);
         imageView.setPreserveRatio(true);
 
-        SingleObjectRenderer objectRenderer = new SingleObjectRenderer(target.getSourcePath(), frameBufferImage, viewSize, viewSize);
+        SingleObjectRenderer objectRenderer = new SingleObjectRenderer(target.getSourcePath(), frameBufferImage, viewSize, viewSize, false);
 
         objectRenderer.setOnTopViewCaptured(image -> openTopViewPreview(objectId, image));
 
@@ -427,12 +482,12 @@ public class MainController
         computeButton.setStyle("-fx-background-color: #0078D7; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
         computeButton.setMaxWidth(Double.MAX_VALUE);
 
-        CheckBox extCheck = new CheckBox("Curbura interioara");
+        CheckBox extCheck = new CheckBox("Curbura exterioara");
         extCheck.setDisable(true);
         extCheck.setStyle("-fx-text-fill: white;");
         extCheck.setOnAction(e -> objectRenderer.setShowExterior(extCheck.isSelected()));
 
-        CheckBox intCheck = new CheckBox("Curbura exterioara");
+        CheckBox intCheck = new CheckBox("Curbura interioara");
         intCheck.setDisable(true);
         intCheck.setStyle("-fx-text-fill: white;");
         intCheck.setOnAction(e -> objectRenderer.setShowInterior(intCheck.isSelected()));
@@ -488,21 +543,25 @@ public class MainController
                 cutButton);
         crossSectionControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
-        Button centerOfMassButton = new Button("Calculeaza centrul de greutate");
-        centerOfMassButton.setStyle("-fx-background-color: #218838; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
-        centerOfMassButton.setMaxWidth(Double.MAX_VALUE);
+        Button aiButton = new Button("Genereaza Vas (AI)");
+        aiButton.setStyle("-fx-background-color: #8a2be2; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        aiButton.setMaxWidth(Double.MAX_VALUE);
+        aiButton.setOnAction(e -> {
+            if (!SessionDatabase.hasSection(objectId)) {
+                Alert err = new Alert(Alert.AlertType.ERROR);
+                err.setTitle("Sectiune lipsa");
+                err.setHeaderText("Nu ai salvat nicio sectiune!");
+                err.setContentText("Te rog sa decupezi si sa salvezi sectiunea inainte de a genera vasul.");
+                err.showAndWait();
+                return;
+            }
+            simulateAIRestoration(Set.of(objectId));
+        });
 
-        Label centerOfMassLabel = new Label();
-        centerOfMassLabel.setStyle("-fx-text-fill: #cccccc;");
+        VBox aiControls = new VBox(8, aiButton);
+        aiControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
-        centerOfMassButton.setOnAction(e -> objectRenderer.requestComputeCenterOfMass());
-        objectRenderer.setOnCenterOfMassComputed(point -> centerOfMassLabel.setText(String.format(
-                "Centru de greutate — X: %.3f | Y: %.3f | Z: %.3f", point.x, point.y, point.z)));
-
-        VBox centerOfMassControls = new VBox(8, centerOfMassButton, centerOfMassLabel);
-        centerOfMassControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
-
-        VBox controls = new VBox(15, infoBox, curvatureControls, crossSectionControls, centerOfMassControls);
+        VBox controls = new VBox(15, infoBox, curvatureControls, crossSectionControls, aiControls);
         controls.setStyle("-fx-padding: 15; -fx-background-color: #2b2b2b;");
 
         ScrollPane scrollPane = new ScrollPane(controls);
