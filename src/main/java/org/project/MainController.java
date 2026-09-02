@@ -75,6 +75,7 @@ public class MainController
     @FXML
     private void handleResetScene(ActionEvent event) {
         if (currentRenderer != null) {
+            currentRenderer.resetCamera();
             for (SceneObject obj : currentRenderer.objects) {
                 if (obj.parent != null) continue;
 
@@ -108,12 +109,19 @@ public class MainController
     private void handleShowControls(ActionEvent event) {
         Alert alert = new Alert(Alert.AlertType.INFORMATION);
         alert.setTitle("Control Vizualizator 3D");
-        alert.setHeaderText("Instructiuni de manipulare");
-        alert.setContentText("• CTRL + Click: Selecteaza mai multe fragmente simultan.\n\n"
-                + "• Click Stanga + Tragere: Roteste obiectul selectat.\n\n"
-                + "• Click Dreapta + Tragere: Muta obiectul.\n\n"
-                + "• Rotita Mouse: Scaleaza obiectul.\n\n"
-                + "• Click pe fundal: Pastreaza selectia curenta.");
+        alert.setHeaderText("Instructiuni de navigare si manipulare");
+        alert.setContentText("• NAVIGARE LIBERA (FLY CAMERA):\n"
+                + "  - Click Stanga + Tragere pe fundal: Roteste directia privirii\n"
+                + "  - W / S: Zbori inainte / inapoi\n"
+                + "  - A / D: Gliseaza stanga / dreapta\n"
+                + "  - Q / E (fara obiect selectat): Coboara / Urca camera\n\n"
+                + "• MANIPULARE OBIECTE:\n"
+                + "  - CTRL + Click: Selectie multipla\n"
+                + "  - Click Stanga + Tragere: Rotiti obiectul pe orizontala/verticala\n"
+                + "  - SHIFT + Click Stanga + Tragere: Rotiti obiectul in planul ecranului (volan)\n"
+                + "  - Click Dreapta + Tragere: Mutati obiectul (Stanga/Dreapta, Inainte/Inapoi)\n"
+                + "  - Q / E (cu obiect selectat): Muta obiectul pe verticala (Sus/Jos)\n"
+                + "  - Rotita Mouse: Scaleaza obiectul");
         alert.showAndWait();
     }
 
@@ -168,11 +176,21 @@ public class MainController
             double deltaX = event.getX() - lastMouseX;
             double deltaY = event.getY() - lastMouseY;
 
-            if (currentRenderer != null && !currentRenderer.getSelectedObjectIds().isEmpty()) {
-                if (event.isPrimaryButtonDown()) {
-                    currentRenderer.rotateSelectedObject((float) deltaX, (float) deltaY);
-                } else if (event.isSecondaryButtonDown()) {
-                    currentRenderer.moveSelectedObject((float) deltaX, (float) deltaY);
+            if (currentRenderer != null) {
+                if (!currentRenderer.getSelectedObjectIds().isEmpty()) {
+                    if (event.isPrimaryButtonDown()) {
+                        if (event.isShiftDown()) {
+                            currentRenderer.rotateSelectedObject(0, 0, (float) deltaX);
+                        } else {
+                            currentRenderer.rotateSelectedObject((float) deltaX, (float) deltaY, 0);
+                        }
+                    } else if (event.isSecondaryButtonDown()) {
+                        currentRenderer.moveSelectedObject((float) deltaX, (float) deltaY);
+                    }
+                } else {
+                    if (event.isPrimaryButtonDown()) {
+                        currentRenderer.updateCameraLook((float) deltaX, (float) deltaY);
+                    }
                 }
             }
 
@@ -183,6 +201,34 @@ public class MainController
         imageView.setOnScroll(event -> {
             if (currentRenderer != null && !currentRenderer.getSelectedObjectIds().isEmpty()) {
                 currentRenderer.scaleSelectedObject((float) event.getDeltaY() * 0.005f);
+            }
+        });
+
+        canvasPlaceholder.setOnKeyPressed(event -> {
+            if (currentRenderer != null) {
+                switch (event.getCode()) {
+                    case W: currentRenderer.moveW = true; break;
+                    case S: currentRenderer.moveS = true; break;
+                    case A: currentRenderer.moveA = true; break;
+                    case D: currentRenderer.moveD = true; break;
+                    case Q: currentRenderer.moveQ = true; break;
+                    case E: currentRenderer.moveE = true; break;
+                    default: break;
+                }
+            }
+        });
+
+        canvasPlaceholder.setOnKeyReleased(event -> {
+            if (currentRenderer != null) {
+                switch (event.getCode()) {
+                    case W: currentRenderer.moveW = false; break;
+                    case S: currentRenderer.moveS = false; break;
+                    case A: currentRenderer.moveA = false; break;
+                    case D: currentRenderer.moveD = false; break;
+                    case Q: currentRenderer.moveQ = false; break;
+                    case E: currentRenderer.moveE = false; break;
+                    default: break;
+                }
             }
         });
 
