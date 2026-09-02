@@ -5,12 +5,16 @@ import javafx.scene.image.PixelFormat;
 import javafx.scene.image.PixelWriter;
 import javafx.scene.image.WritableImage;
 import org.joml.Matrix4f;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
+import org.joml.Vector4f;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL30;
 import org.lwjgl.system.MemoryUtil;
 
 import java.io.File;
+import java.nio.FloatBuffer;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.nio.ByteBuffer;
@@ -43,9 +47,22 @@ public class OpenGLRenderer implements Runnable
     private final Set<Integer> selectedObjectIds = ConcurrentHashMap.newKeySet();
     private Consumer<Set<Integer>> onSelectionChanged;
 
-    public OpenGLRenderer(WritableImage fxImage)
-    {
+    private volatile float yaw = -90.0f;
+    private volatile float pitch = -15.0f;
+    private volatile Vector3f camPos = new Vector3f(0.0f, 2.0f, 5.0f);
+    private volatile Vector3f camFront = new Vector3f(0.0f, 0.0f, -1.0f);
+    private volatile Vector3f camUp = new Vector3f(0.0f, 1.0f, 0.0f);
+
+    public volatile boolean moveW = false;
+    public volatile boolean moveS = false;
+    public volatile boolean moveA = false;
+    public volatile boolean moveD = false;
+    public volatile boolean moveQ = false;
+    public volatile boolean moveE = false;
+
+    public OpenGLRenderer(WritableImage fxImage) {
         this.fxImage = fxImage;
+        updateCameraVectors();
     }
 
     public void queueModelLoad(String filePath) { pendingModels.add(filePath); }
@@ -78,6 +95,33 @@ public class OpenGLRenderer implements Runnable
         }
     }
 
+    public void updateCameraLook(float deltaX, float deltaY) {
+        yaw += deltaX * 0.15f;
+        pitch += deltaY * 0.15f;
+
+        if (pitch > 89.0f) pitch = 89.0f;
+        if (pitch < -89.0f) pitch = -89.0f;
+
+        updateCameraVectors();
+    }
+
+    private void updateCameraVectors() {
+        float rYaw = (float) Math.toRadians(yaw);
+        float rPitch = (float) Math.toRadians(pitch);
+
+        camFront.x = (float) (Math.cos(rYaw) * Math.cos(rPitch));
+        camFront.y = (float) Math.sin(rPitch);
+        camFront.z = (float) (Math.sin(rYaw) * Math.cos(rPitch));
+        camFront.normalize();
+    }
+
+    public void resetCamera() {
+        camPos.set(0.0f, 2.0f, 5.0f);
+        yaw = -90.0f;
+        pitch = -15.0f;
+        updateCameraVectors();
+    }
+
     @Override
     public void run() {
         if (!GLFW.glfwInit()) throw new IllegalStateException("Nu s-a putut initializa GLFW");
@@ -106,7 +150,7 @@ public class OpenGLRenderer implements Runnable
         GL30.glRenderbufferStorage(GL30.GL_RENDERBUFFER, GL30.GL_DEPTH24_STENCIL8, width, height);
         GL30.glFramebufferRenderbuffer(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_STENCIL_ATTACHMENT, GL30.GL_RENDERBUFFER, rbo);
 
-        ShaderProgram shader;
+        ShaderProgram shader, overlayShader;
         try {
             shader = new ShaderProgram();
             shader.createVertexShader(Files.readString(Paths.get("src/main/resources/shaders/vertex.glsl")));
@@ -115,13 +159,41 @@ public class OpenGLRenderer implements Runnable
             shader.bind();
             shader.setUniform("texture1", 0);
             shader.unbind();
+
+            overlayShader = new ShaderProgram();
+            overlayShader.createVertexShader(Files.readString(Paths.get("src/main/resources/shaders/overlay_vertex.glsl")));
+            overlayShader.createFragmentShader(Files.readString(Paths.get("src/main/resources/shaders/overlay_fragment.glsl")));
+            overlayShader.link();
         } catch (Exception e) {
             e.printStackTrace();
             return;
         }
 
+        List<Float> gridVerts = new ArrayList<>();
+        float gridExtent = 50.0f;
+        float gridStep = 1.0f;
+        for(float i = -gridExtent; i <= gridExtent; i += gridStep) {
+            gridVerts.add(i); gridVerts.add(0f); gridVerts.add(-gridExtent);
+            gridVerts.add(i); gridVerts.add(0f); gridVerts.add(gridExtent);
+            gridVerts.add(-gridExtent); gridVerts.add(0f); gridVerts.add(i);
+            gridVerts.add(gridExtent); gridVerts.add(0f); gridVerts.add(i);
+        }
+        float[] gridData = new float[gridVerts.size()];
+        for(int i = 0; i < gridData.length; i++) gridData[i] = gridVerts.get(i);
+
+        int gridVao = GL30.glGenVertexArrays();
+        int gridVbo = GL30.glGenBuffers();
+        GL30.glBindVertexArray(gridVao);
+        GL30.glBindBuffer(GL30.GL_ARRAY_BUFFER, gridVbo);
+        FloatBuffer gridBuf = MemoryUtil.memAllocFloat(gridData.length);
+        gridBuf.put(gridData).flip();
+        GL30.glBufferData(GL30.GL_ARRAY_BUFFER, gridBuf, GL30.GL_STATIC_DRAW);
+        GL30.glVertexAttribPointer(0, 3, GL30.GL_FLOAT, false, 0, 0);
+        GL30.glEnableVertexAttribArray(0);
+        MemoryUtil.memFree(gridBuf);
+        GL30.glBindVertexArray(0);
+
         Matrix4f projection = new Matrix4f().perspective((float) Math.toRadians(45.0f), (float) width / height, 0.1f, 100.0f);
-        Matrix4f view = new Matrix4f().lookAt(0.0f, 0.0f, 5.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f);
 
         ByteBuffer pixelBuffer = MemoryUtil.memAlloc(width * height * 4);
         ByteBuffer pickingPixelBuffer = MemoryUtil.memAlloc(4);
@@ -187,9 +259,7 @@ public class OpenGLRenderer implements Runnable
                                 float objScale = (parts.length >= 9) ? Float.parseFloat(parts[8]) : 0.15f;
 
                                 File objFile = new File(sectionFolder, filename);
-                                if (!objFile.exists()) {
-                                    continue;
-                                }
+                                if (!objFile.exists()) continue;
 
                                 Mesh mesh = ModelLoader.loadModel(objFile.getAbsolutePath());
                                 SceneObject child = new SceneObject(nextObjectId++, mesh, objFile.getAbsolutePath());
@@ -206,8 +276,42 @@ public class OpenGLRenderer implements Runnable
 
                 processPendingDeletions();
 
+                float speed = 0.08f;
+                if (moveW) camPos.add(new Vector3f(camFront).mul(speed));
+                if (moveS) camPos.sub(new Vector3f(camFront).mul(speed));
+                Vector3f right = new Vector3f(camFront).cross(camUp).normalize();
+                if (moveA) camPos.sub(new Vector3f(right).mul(speed));
+                if (moveD) camPos.add(new Vector3f(right).mul(speed));
+
+                if (selectedObjectIds.isEmpty()) {
+                    if (moveQ) camPos.sub(new Vector3f(camUp).mul(speed));
+                    if (moveE) camPos.add(new Vector3f(camUp).mul(speed));
+                } else {
+                    if (moveQ) moveSelectedObjectVertical(-speed);
+                    if (moveE) moveSelectedObjectVertical(speed);
+                }
+
+                Matrix4f view = new Matrix4f().lookAt(camPos, new Vector3f(camPos).add(camFront), camUp);
+
                 GL30.glClearColor(0.16f, 0.16f, 0.16f, 1.0f);
                 GL30.glClear(GL30.GL_COLOR_BUFFER_BIT | GL30.GL_DEPTH_BUFFER_BIT);
+
+                GL30.glEnable(GL30.GL_BLEND);
+                GL30.glBlendFunc(GL30.GL_SRC_ALPHA, GL30.GL_ONE_MINUS_SRC_ALPHA);
+                overlayShader.bind();
+                overlayShader.setUniform("projection", projection);
+                overlayShader.setUniform("view", view);
+
+                Matrix4f gridModel = new Matrix4f().translate(0.0f, -0.02f, 0.0f);
+                overlayShader.setUniform("model", gridModel);
+                overlayShader.setUniform("color", new Vector4f(0.3f, 0.5f, 0.8f, 0.5f));
+
+                GL30.glBindVertexArray(gridVao);
+                GL30.glDrawArrays(GL30.GL_LINES, 0, gridData.length / 3);
+                GL30.glBindVertexArray(0);
+
+                overlayShader.unbind();
+                GL30.glDisable(GL30.GL_BLEND);
 
                 shader.bind();
                 shader.setUniform("projection", projection);
@@ -307,22 +411,57 @@ public class OpenGLRenderer implements Runnable
 
     public void moveSelectedObject(float deltaX, float deltaY) {
         if (selectedObjectIds.isEmpty()) return;
+
+        Vector3f camRight = new Vector3f(camFront).cross(camUp).normalize();
+
         for (SceneObject obj : objects) {
-            if (selectedObjectIds.contains(obj.getId())) {
-                if (obj.parent != null) continue;
-                obj.position.x += deltaX * 0.01f;
-                obj.position.y += deltaY * 0.01f;
+            if (selectedObjectIds.contains(obj.getId()) && obj.parent == null) {
+                Vector3f rightMovement = new Vector3f(camRight).mul(deltaX * 0.01f);
+                Vector3f depthMovement = new Vector3f(camFront).mul(-deltaY * 0.01f);
+
+                obj.position.add(rightMovement);
+                obj.position.add(depthMovement);
+            }
+        }
+    }
+
+    public void moveSelectedObjectVertical(float delta) {
+        if (selectedObjectIds.isEmpty()) return;
+        for (SceneObject obj : objects) {
+            if (selectedObjectIds.contains(obj.getId()) && obj.parent == null) {
+                Vector3f upMovement = new Vector3f(camUp).mul(delta);
+                obj.position.add(upMovement);
             }
         }
     }
 
     public void rotateSelectedObject(float deltaX, float deltaY) {
+        rotateSelectedObject(deltaX, deltaY, 0f);
+    }
+
+    public void rotateSelectedObject(float deltaX, float deltaY, float deltaRoll) {
         if (selectedObjectIds.isEmpty()) return;
+
+        Vector3f camRight = new Vector3f(camFront).cross(camUp).normalize();
+
         for (SceneObject obj : objects) {
-            if (selectedObjectIds.contains(obj.getId())) {
-                if (obj.parent != null) continue;
-                obj.rotation.y -= deltaX * 0.01f;
-                obj.rotation.x -= deltaY * 0.01f;
+            if (selectedObjectIds.contains(obj.getId()) && obj.parent == null) {
+                Quaternionf q = new Quaternionf().rotationXYZ(obj.rotation.x, obj.rotation.y, obj.rotation.z);
+
+                if (deltaX != 0) {
+                    Quaternionf rotY = new Quaternionf().rotateAxis(deltaX * 0.01f, camUp.x, camUp.y, camUp.z);
+                    q = rotY.mul(q);
+                }
+                if (deltaY != 0) {
+                    Quaternionf rotX = new Quaternionf().rotateAxis(-deltaY * 0.01f, camRight.x, camRight.y, camRight.z);
+                    q = rotX.mul(q);
+                }
+                if (deltaRoll != 0) {
+                    Quaternionf rotZ = new Quaternionf().rotateAxis(-deltaRoll * 0.01f, camFront.x, camFront.y, camFront.z);
+                    q = rotZ.mul(q);
+                }
+
+                obj.rotation.set(q.getEulerAnglesXYZ(new Vector3f()));
             }
         }
     }
