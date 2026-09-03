@@ -541,6 +541,12 @@ public class MainController
         Label widthLabel = new Label("Latime estimata: Nedeterminat");
         widthLabel.setStyle("-fx-text-fill: #ffcc00; -fx-font-weight: bold;");
 
+        Label spreadLabel = new Label("Distantare stanga/dreapta");
+        spreadLabel.setStyle("-fx-text-fill: white;");
+        Slider spreadSlider = new Slider(0, 0.6, 0.15);
+        spreadSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setCurvatureSpread(newVal.floatValue()));
+
         computeButton.setOnAction(e -> {
             computeButton.setText("Se calculeaza...");
             computeButton.setDisable(true);
@@ -579,7 +585,7 @@ public class MainController
         Label l2 = new Label("Sectiune verticala"); l2.setStyle("-fx-text-fill: white;");
         Label l3 = new Label("Pozitie plan"); l3.setStyle("-fx-text-fill: white;");
 
-        VBox curvatureControls = new VBox(8, computeButton, extCheck, intCheck, widthLabel);
+        VBox curvatureControls = new VBox(8, computeButton, extCheck, intCheck, widthLabel, spreadLabel, spreadSlider);
         curvatureControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
         VBox crossSectionControls = new VBox(8,
