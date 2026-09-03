@@ -16,3 +16,14 @@ build/
 # OS
 Thumbs.db
 .DS_Store
+
+# AI
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+*.pth
+
+ai/installed.txt
+ai/shards/
+ai/output/
