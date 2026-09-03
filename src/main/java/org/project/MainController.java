@@ -358,7 +358,7 @@
             if (!installedFile.exists()) {
                 Alert librariesMissingAlert = new Alert(Alert.AlertType.CONFIRMATION);
                 librariesMissingAlert.setTitle("Instalare librarii");
-                librariesMissingAlert.setHeaderText("Librariile AI lipsesc");
+                librariesMissingAlert.setHeaderText("Lipsesc librarii pentru AI");
                 librariesMissingAlert.setContentText("Pentru a genera un vas, trebuie descarcate librariile utilizate de AI (poate dura cateva minute).\nDoresti sa le instalezi?");
                 librariesMissingAlert.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
 
@@ -424,21 +424,31 @@
                         }
                     }
                     else{
+                        boolean isMissingLibrary = pythonOutput.contains("ModuleNotFound")|| pythonOutput.contains("ImportError");
+
                         Platform.runLater(() -> {
-                            Alert err = new Alert(Alert.AlertType.ERROR);
-                            err.setTitle("Eroare Script Python");
-                            err.setHeaderText("AI-ul a returnat o eroare!");
-                            err.setContentText("Cod de eroare: " + aiExitCode);
+                            if(isMissingLibrary) {
+                                if (installedFile.exists()) {
+                                    installedFile.delete();
+                                }
+                                simulateAIRestoration(objectIds);
+                            }
+                            else {
+                                Alert err = new Alert(Alert.AlertType.ERROR);
+                                err.setTitle("Eroare Script Python");
+                                err.setHeaderText("AI-ul a returnat o eroare!");
+                                err.setContentText("Cod de eroare: " + aiExitCode);
 
-                            TextArea textArea = new TextArea(pythonOutput);
-                            textArea.setEditable(false);
-                            textArea.setWrapText(true);
-                            textArea.setMaxWidth(Double.MAX_VALUE);
-                            textArea.setMaxHeight(Double.MAX_VALUE);
-                            err.getDialogPane().setExpandableContent(textArea);
-                            err.getDialogPane().setExpanded(true);
+                                TextArea textArea = new TextArea(pythonOutput);
+                                textArea.setEditable(false);
+                                textArea.setWrapText(true);
+                                textArea.setMaxWidth(Double.MAX_VALUE);
+                                textArea.setMaxHeight(Double.MAX_VALUE);
+                                err.getDialogPane().setExpandableContent(textArea);
+                                err.getDialogPane().setExpanded(true);
 
-                            err.showAndWait();
+                                err.showAndWait();
+                            }
                         });
                     }
 
