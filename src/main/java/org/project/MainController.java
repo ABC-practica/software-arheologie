@@ -343,9 +343,11 @@
                 e.printStackTrace();
                 Platform.runLater(() -> {
                 Alert err = new Alert(Alert.AlertType.ERROR);
-                err.setTitle("Eroare de Conexiune");
-                err.setHeaderText("Nu s-a putut conecta la AI");
-                err.setContentText("Asigura-te ca ai pornit serverul Python in fundal (pe portul 8000).");
+                infoAlert.close();
+                err.setTitle("Eroare Instalare Librarii");
+                err.setHeaderText("Nu s-a putut instala librariile Python");
+                err.setContentText("A aparut o eroare la executarea comenzii 'pip'. Asigura-te ca Python este instalat pe acest calculator si ca a fost adaugat in variabila de mediu PATH.");
+                err.getDialogPane().minHeight(Region.USE_PREF_SIZE);
                 err.showAndWait();
         });
     }
@@ -437,7 +439,7 @@
                                 Alert err = new Alert(Alert.AlertType.ERROR);
                                 err.setTitle("Eroare Script Python");
                                 err.setHeaderText("AI-ul a returnat o eroare!");
-                                err.setContentText("Cod de eroare: " + aiExitCode);
+                                err.setContentText("Extinde sectiune de mai jos pentru a vedea detalii");
 
                                 TextArea textArea = new TextArea(pythonOutput);
                                 textArea.setEditable(false);
@@ -445,7 +447,7 @@
                                 textArea.setMaxWidth(Double.MAX_VALUE);
                                 textArea.setMaxHeight(Double.MAX_VALUE);
                                 err.getDialogPane().setExpandableContent(textArea);
-                                err.getDialogPane().setExpanded(true);
+                                err.getDialogPane().setExpanded(false);
 
                                 err.showAndWait();
                             }
