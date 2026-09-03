@@ -309,6 +309,35 @@ public class MainController
         selectionPopup.show(ownerWindow, lastClickScreenX, lastClickScreenY);
     }
 
+    private void installAiLibraries(File aiDir){
+        try {
+            ProcessBuilder req = new ProcessBuilder("python", "-m", "pip", "install", "-r", "requirements.txt");
+            req.directory(aiDir);
+            req.redirectErrorStream(true);
+            Process reqProcess = req.start();
+
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(reqProcess.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    System.out.println("[PIP LIVE] " + line);
+                }
+            }
+
+            reqProcess.waitFor();
+
+            File installedDummy = new File(aiDir, "installed.txt");
+            installedDummy.createNewFile();
+        } catch (Exception e) {
+            e.printStackTrace();
+            Platform.runLater(() -> {
+            Alert err = new Alert(Alert.AlertType.ERROR);
+            err.setTitle("Eroare de Conexiune");
+            err.setHeaderText("Nu s-a putut conecta la AI");
+            err.setContentText("Asigura-te ca ai pornit serverul Python in fundal (pe portul 8000).");
+            err.showAndWait();
+    });
+}
+    }
     private void simulateAIRestoration(Set<Integer> objectIds) {
         Alert infoAlert = new Alert(Alert.AlertType.INFORMATION);
         infoAlert.setTitle("Comunicare AI Backend");
@@ -321,51 +350,63 @@ public class MainController
                 int firstId = objectIds.iterator().next();
                 WritableImage sectionImage = SessionDatabase.getSection(firstId);
 
-                File tempImageFile = File.createTempFile("section_upload_", ".png");
-                ImageExporter.savePng(sectionImage, tempImageFile);
+                File aiDir=new File("ai");
 
-                String boundary = "---Boundary" + System.currentTimeMillis();
-                byte[] fileBytes = java.nio.file.Files.readAllBytes(tempImageFile.toPath());
+                File installedFile = new File(aiDir, "installed.txt");
 
-                String header = "--" + boundary + "\r\n" +
-                        "Content-Disposition: form-data; name=\"file\"; filename=\"" + tempImageFile.getName() + "\"\r\n" +
-                        "Content-Type: image/png\r\n\r\n";
-                String footer = "\r\n--" + boundary + "--\r\n";
+                if (!installedFile.exists()){
+                    installAiLibraries(aiDir);
+                }
 
-                java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream();
-                outputStream.write(header.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-                outputStream.write(fileBytes);
-                outputStream.write(footer.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                File inputDir = new File(aiDir,"shards");
+                File outputDir = new File(aiDir,"output");
 
-                java.net.http.HttpClient client = java.net.http.HttpClient.newHttpClient();
-                java.net.http.HttpRequest request = java.net.http.HttpRequest.newBuilder()
-                        .uri(java.net.URI.create("http://127.0.0.1:8000/generate-vessel"))
-                        .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                        .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(outputStream.toByteArray()))
-                        .build();
+                inputDir.mkdirs();
+                outputDir.mkdirs();
 
-                java.net.http.HttpResponse<String> response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+                File generatedObj=new File(outputDir,"ai_solid_proportioned_pot.obj");
+                if (generatedObj.exists()){
+                    generatedObj.delete();
+                }
+
+                File imagePath = new File(inputDir, "shard.png");
+                ImageExporter.savePng(sectionImage, imagePath);
+
+                String aiScript = "rotate.py";
+                ProcessBuilder aiProcessBuilder = new ProcessBuilder("python",aiScript);
+                aiProcessBuilder.redirectErrorStream(true);
+                aiProcessBuilder.directory(aiDir);
+
+                Process aiProcess = aiProcessBuilder.start();
+
+                String pythonOutput = new String(aiProcess.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                int aiExitCode=aiProcess.waitFor();
 
                 Platform.runLater(infoAlert::close);
 
-                if (response.statusCode() == 200) {
-                    File tempObjFile = File.createTempFile("restored_vessel_", ".obj");
-                    java.nio.file.Files.writeString(tempObjFile.toPath(), response.body());
-
-                    Platform.runLater(() -> {
-                        openRestoredVaseWindow(tempObjFile.getAbsolutePath());
-                    });
-                } else {
+                if (aiExitCode==0){
+                    if (generatedObj.exists()){
+                        Platform.runLater(()->openRestoredVaseWindow(generatedObj.getAbsolutePath()));
+                    }
+                }
+                else{
                     Platform.runLater(() -> {
                         Alert err = new Alert(Alert.AlertType.ERROR);
-                        err.setTitle("Eroare AI Backend");
-                        err.setHeaderText("Eroare la generare");
-                        err.setContentText("Serverul Python a returnat status: " + response.statusCode() + "\nMesaj: " + response.body());
+                        err.setTitle("Eroare Script Python");
+                        err.setHeaderText("AI-ul a returnat o eroare!");
+                        err.setContentText("Cod de eroare: " + aiExitCode);
+
+                        TextArea textArea = new TextArea(pythonOutput);
+                        textArea.setEditable(false);
+                        textArea.setWrapText(true);
+                        textArea.setMaxWidth(Double.MAX_VALUE);
+                        textArea.setMaxHeight(Double.MAX_VALUE);
+                        err.getDialogPane().setExpandableContent(textArea);
+                        err.getDialogPane().setExpanded(true);
+
                         err.showAndWait();
                     });
                 }
-
-                tempImageFile.delete();
 
             } catch (Exception e) {
                 e.printStackTrace();
