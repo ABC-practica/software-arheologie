@@ -1,6 +1,7 @@
 package org.project;
 
 import javafx.application.Platform;
+import javafx.concurrent.Task;
 import javafx.event.ActionEvent;
 import javafx.fxml.FXML;
 import javafx.scene.Scene;
@@ -14,6 +15,7 @@ import javafx.stage.DirectoryChooser;
 import javafx.stage.Popup;
 import javafx.stage.Stage;
 import org.project.engine.*;
+import org.joml.Vector3f;
 import javafx.geometry.Pos;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -355,6 +357,11 @@ public class MainController
         selectionPopup.show(ownerWindow, lastClickScreenX, lastClickScreenY);
     }
 
+    private static String planeEquationText(Vector3f normal, Vector3f point) {
+        float d = normal.dot(point);
+        return String.format("%.3fx %+.3fy %+.3fz = %.3f", normal.x, normal.y, normal.z, d);
+    }
+
     private void simulateAIRestoration(Set<Integer> objectIds) {
         Alert infoAlert = new Alert(Alert.AlertType.INFORMATION);
         infoAlert.setTitle("Comunicare AI Backend");
@@ -464,6 +471,31 @@ public class MainController
         vaseStage.show();
     }
 
+    private String formatClassification(SherdPythonAnalyzer.SherdAnalysisResult r) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Forma: ").append(r.formClass());
+        if ("unknown".equals(r.formClass())) {
+            sb.append(" (sherdtool.py nu calculeaza inca aceasta eticheta)");
+        }
+        sb.append('\n');
+        sb.append(String.format("Calitate fit: %s%n", r.quality()));
+        sb.append(String.format("Vertecsi / fete: %d / %d%n", r.nVertices(), r.nFaces()));
+        sb.append(String.format("Unitate: %s%n", r.unit()));
+        sb.append(String.format("Inaltime pastrata: %.3f%n", r.preservedHeight()));
+        sb.append(String.format("Diametru buza: %.3f%n", r.rimDiameter()));
+        sb.append(String.format("Diametru maxim: %.3f%n", r.maxDiameter()));
+        sb.append(String.format("Inaltime umar: %.3f%n", r.shoulderHeight()));
+        sb.append(String.format("Arc pastrat: %.1f°%n", r.preservedArcDeg()));
+        sb.append(String.format("Azimut sectiune: %.1f°%n", r.sectionAzimuthDeg()));
+        sb.append(String.format("RMSE fit axa: %.4f%n", r.fitResidualRmse()));
+        sb.append("Axa: ").append(r.axisDir()).append(" @ ").append(r.axisPoint()).append('\n');
+        sb.append("Extent bbox: ").append(r.bboxExtent());
+        if (r.notes() != null && !r.notes().isBlank()) {
+            sb.append("\nNote: ").append(r.notes());
+        }
+        return sb.toString();
+    }
+
     private void openObjectWindow(int objectId)
     {
         Stage existing = openObjectWindows.get(objectId);
@@ -484,6 +516,7 @@ public class MainController
             }
         }
         if (target == null) return;
+        final String meshSourcePath = target.getSourcePath();
 
         int viewSize = 500;
         WritableImage frameBufferImage = new WritableImage(viewSize, viewSize);
@@ -541,6 +574,12 @@ public class MainController
         Label widthLabel = new Label("Latime estimata: Nedeterminat");
         widthLabel.setStyle("-fx-text-fill: #ffcc00; -fx-font-weight: bold;");
 
+        Label extEquationLabel = new Label("Ecuatie plan exterior: Nedeterminat");
+        extEquationLabel.setStyle("-fx-text-fill: #ff6666; -fx-font-family: monospace;");
+
+        Label intEquationLabel = new Label("Ecuatie plan interior: Nedeterminat");
+        intEquationLabel.setStyle("-fx-text-fill: #66aaff; -fx-font-family: monospace;");
+
         Label spreadLabel = new Label("Distantare stanga/dreapta");
         spreadLabel.setStyle("-fx-text-fill: white;");
         Slider spreadSlider = new Slider(0, 0.6, 0.15);
@@ -560,6 +599,9 @@ public class MainController
 
             float distance = result.exteriorPlanePoint.distance(result.interiorPlanePoint);
             widthLabel.setText(String.format("Latime estimata: %.3f unitati", distance));
+
+            extEquationLabel.setText("Exterior: " + planeEquationText(result.exteriorPlaneNormal, result.exteriorPlanePoint));
+            intEquationLabel.setText("Interior: " + planeEquationText(result.interiorPlaneNormal, result.interiorPlanePoint));
         });
 
         Slider yawSlider = new Slider(0, 360, 0);
@@ -585,7 +627,8 @@ public class MainController
         Label l2 = new Label("Sectiune verticala"); l2.setStyle("-fx-text-fill: white;");
         Label l3 = new Label("Pozitie plan"); l3.setStyle("-fx-text-fill: white;");
 
-        VBox curvatureControls = new VBox(8, computeButton, extCheck, intCheck, widthLabel, spreadLabel, spreadSlider);
+        VBox curvatureControls = new VBox(8, computeButton, extCheck, intCheck, widthLabel,
+                extEquationLabel, intEquationLabel, spreadLabel, spreadSlider);
         curvatureControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
         VBox crossSectionControls = new VBox(8,
@@ -613,7 +656,48 @@ public class MainController
         VBox aiControls = new VBox(8, aiButton);
         aiControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
-        VBox controls = new VBox(15, infoBox, curvatureControls, crossSectionControls, aiControls);
+        Button classifyButton = new Button("Clasifica ciob (Python)");
+        classifyButton.setStyle("-fx-background-color: #e07b00; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        classifyButton.setMaxWidth(Double.MAX_VALUE);
+
+        TextArea classifyResultArea = new TextArea("Apasa butonul pentru a rula analiza sherdtool.py pe acest ciob.");
+        classifyResultArea.setEditable(false);
+        classifyResultArea.setWrapText(true);
+        classifyResultArea.setPrefRowCount(9);
+        classifyResultArea.setStyle("-fx-control-inner-background: #2b2b2b; -fx-text-fill: #dddddd; -fx-font-family: monospace;");
+
+        classifyButton.setOnAction(e -> {
+            classifyButton.setText("Se analizeaza...");
+            classifyButton.setDisable(true);
+            classifyResultArea.setText("Se ruleaza sherdtool.py, poate dura cateva zeci de secunde...");
+
+            Task<SherdPythonAnalyzer.SherdAnalysisResult> classifyTask = new Task<>() {
+                @Override
+                protected SherdPythonAnalyzer.SherdAnalysisResult call() throws Exception {
+                    return SherdPythonAnalyzer.analyze(java.nio.file.Path.of(meshSourcePath));
+                }
+            };
+            classifyTask.setOnSucceeded(ev -> {
+                classifyButton.setText("Clasifica ciob (Python)");
+                classifyButton.setDisable(false);
+                classifyResultArea.setText(formatClassification(classifyTask.getValue()));
+            });
+            classifyTask.setOnFailed(ev -> {
+                classifyButton.setText("Clasifica ciob (Python)");
+                classifyButton.setDisable(false);
+                Throwable ex = classifyTask.getException();
+                classifyResultArea.setText("Eroare: " + (ex != null ? ex.getMessage() : "necunoscuta"));
+            });
+
+            Thread classifyThread = new Thread(classifyTask);
+            classifyThread.setDaemon(true);
+            classifyThread.start();
+        });
+
+        VBox classifyControls = new VBox(8, classifyButton, classifyResultArea);
+        classifyControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
+
+        VBox controls = new VBox(15, infoBox, curvatureControls, crossSectionControls, aiControls, classifyControls);
         controls.setStyle("-fx-padding: 15; -fx-background-color: #2b2b2b;");
 
         ScrollPane scrollPane = new ScrollPane(controls);
