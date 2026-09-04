@@ -16,3 +16,7 @@ build/
 # OS
 Thumbs.db
 .DS_Store
+
+# Python (python/sherdtool.py)
+__pycache__/
+*.pyc

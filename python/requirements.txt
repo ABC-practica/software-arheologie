@@ -1,0 +1,5 @@
+trimesh
+numpy
+scipy
+matplotlib
+shapely
