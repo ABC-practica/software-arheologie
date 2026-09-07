@@ -14,7 +14,6 @@ from pathlib import Path
 
 from skimage import morphology
 from skimage.filters import threshold_otsu
-from skimage import transform
 
 
 #import gs

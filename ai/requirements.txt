@@ -4,9 +4,7 @@ numpy
 scipy
 scikit-image
 pillow
-trimesh
 matplotlib
-plotly
 pandas
 opencv-python
 scikit-learn

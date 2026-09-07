@@ -1,11 +1,6 @@
 ### Autoencoders are based on https://github.com/rasbt/stat453-deep-learning-ss21/blob/main/L17/1_VAE_mnist_sigmoid_mse.ipynb 
 
 
-import torch
-from torch.utils.data import Dataset
-import numpy as np
-from skimage.transform import rescale
-
 from torch import nn
 
 from utils import *
