@@ -22,7 +22,6 @@ __pycache__/
 *.py[cod]
 *$py.class
 .venv/
-*.pth
 
 ai/installed.txt
 ai/shards/
