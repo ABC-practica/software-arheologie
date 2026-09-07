@@ -1,3 +1,4 @@
+import argparse
 import os
 import sys
 import importlib.util
@@ -7,25 +8,22 @@ from PIL import Image
 from skimage.measure import label, regionprops, find_contours
 from skimage.transform import resize
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
-REPO_PATH = os.path.join(BASE_DIR, "ReconstructionPots")
-
-models_path = os.path.join(REPO_PATH, "models.py")
-if not os.path.exists(models_path):
-    raise FileNotFoundError(f"Missing models.py at {models_path}. Check repository clone.")
-
-sys.path.insert(0, REPO_PATH)
-
-spec = importlib.util.spec_from_file_location("models", models_path)
-models = importlib.util.module_from_spec(spec)
-sys.modules["models"] = models
-spec.loader.exec_module(models)
-
 from models import CustomModel
 
-SHARD_FOLDER = os.path.join(BASE_DIR, "shards")
-OUTPUT_DIR = os.path.join(BASE_DIR, "output")
-REGRESSOR_WEIGHTS = os.path.join(BASE_DIR, "regressor_model.pth")
+if getattr(sys, 'frozen', False):
+    BASE_DIR=os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
+
+REGRESSOR_WEIGHTS= os.path.join(BASE_DIR, "regressor_model.pth")
+
+parser = argparse.ArgumentParser(description="AI Pot Reconstruction")
+parser.add_argument("--input", required=True,  help="Path to input folder")
+parser.add_argument("--output", required=True, help="Path to output folder")
+args=parser.parse_args()
+
+SHARD_FOLDER=args.input
+OUTPUT_DIR=args.output
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
