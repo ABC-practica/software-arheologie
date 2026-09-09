@@ -27,6 +27,54 @@
     import java.util.*;
 
     public class MainController
+package org.project;
+
+import javafx.application.Platform;
+import javafx.concurrent.Task;
+import javafx.event.ActionEvent;
+import javafx.fxml.FXML;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.image.ImageView;
+import javafx.scene.image.WritableImage;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
+import javafx.stage.DirectoryChooser;
+import javafx.stage.Popup;
+import javafx.stage.Stage;
+import org.project.engine.*;
+import org.joml.Vector3f;
+import javafx.geometry.Pos;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.Region;
+import javafx.stage.Screen;
+import javafx.geometry.Rectangle2D;
+
+import java.io.File;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+
+public class MainController
+{
+    @FXML
+    private StackPane canvasPlaceholder;
+
+    private Thread renderThread;
+
+    private OpenGLRenderer currentRenderer;
+    private double lastMouseX = 0;
+    private double lastMouseY = 0;
+    private double lastClickScreenX = 0;
+    private double lastClickScreenY = 0;
+    private final Popup selectionPopup = new Popup();
+    private final Map<Integer, Stage> openObjectWindows = new HashMap<>();
+
+    @FXML
+    private void handleFileUpload(ActionEvent event)
     {
         @FXML
         private StackPane canvasPlaceholder;
@@ -71,11 +119,12 @@
             }
         }
 
-        @FXML
-        private void handleResetScene(ActionEvent event) {
-            if (currentRenderer != null) {
-                for (SceneObject obj : currentRenderer.objects) {
-                    if (obj.parent != null) continue;
+    @FXML
+    private void handleResetScene(ActionEvent event) {
+        if (currentRenderer != null) {
+            currentRenderer.resetCamera();
+            for (SceneObject obj : currentRenderer.objects) {
+                if (obj.parent != null) continue;
 
                     obj.position.set(0, 0, 0);
                     obj.rotation.set(0, 0, 0);
@@ -103,18 +152,25 @@
             }
         }
 
-        @FXML
-        private void handleShowControls(ActionEvent event) {
-            Alert alert = new Alert(Alert.AlertType.INFORMATION);
-            alert.setTitle("Control Vizualizator 3D");
-            alert.setHeaderText("Instructiuni de manipulare");
-            alert.setContentText("• CTRL + Click: Selecteaza mai multe fragmente simultan.\n\n"
-                    + "• Click Stanga + Tragere: Roteste obiectul selectat.\n\n"
-                    + "• Click Dreapta + Tragere: Muta obiectul.\n\n"
-                    + "• Rotita Mouse: Scaleaza obiectul.\n\n"
-                    + "• Click pe fundal: Pastreaza selectia curenta.");
-            alert.showAndWait();
-        }
+    @FXML
+    private void handleShowControls(ActionEvent event) {
+        Alert alert = new Alert(Alert.AlertType.INFORMATION);
+        alert.setTitle("Control Vizualizator 3D");
+        alert.setHeaderText("Instructiuni de navigare si manipulare");
+        alert.setContentText("• NAVIGARE LIBERA (FLY CAMERA):\n"
+                + "  - Click Stanga + Tragere pe fundal: Roteste directia privirii\n"
+                + "  - W / S: Zbori inainte / inapoi\n"
+                + "  - A / D: Gliseaza stanga / dreapta\n"
+                + "  - Q / E (fara obiect selectat): Coboara / Urca camera\n\n"
+                + "• MANIPULARE OBIECTE:\n"
+                + "  - CTRL + Click: Selectie multipla\n"
+                + "  - Click Stanga + Tragere: Rotiti obiectul pe orizontala/verticala\n"
+                + "  - SHIFT + Click Stanga + Tragere: Rotiti obiectul in planul ecranului (volan)\n"
+                + "  - Click Dreapta + Tragere: Mutati obiectul (Stanga/Dreapta, Inainte/Inapoi)\n"
+                + "  - Q / E (cu obiect selectat): Muta obiectul pe verticala (Sus/Jos)\n"
+                + "  - Rotita Mouse: Scaleaza obiectul");
+        alert.showAndWait();
+    }
 
         @FXML
         private void handleExit(ActionEvent event) {
@@ -167,11 +223,20 @@
                 double deltaX = event.getX() - lastMouseX;
                 double deltaY = event.getY() - lastMouseY;
 
-                if (currentRenderer != null && !currentRenderer.getSelectedObjectIds().isEmpty()) {
+            if (currentRenderer != null) {
+                if (!currentRenderer.getSelectedObjectIds().isEmpty()) {
                     if (event.isPrimaryButtonDown()) {
-                        currentRenderer.rotateSelectedObject((float) deltaX, (float) deltaY);
+                        if (event.isShiftDown()) {
+                            currentRenderer.rotateSelectedObject(0, 0, (float) deltaX);
+                        } else {
+                            currentRenderer.rotateSelectedObject((float) deltaX, (float) deltaY, 0);
+                        }
                     } else if (event.isSecondaryButtonDown()) {
                         currentRenderer.moveSelectedObject((float) deltaX, (float) deltaY);
+                    }
+                } else {
+                    if (event.isPrimaryButtonDown()) {
+                        currentRenderer.updateCameraLook((float) deltaX, (float) deltaY);
                     }
                 }
 
@@ -179,11 +244,38 @@
                 lastMouseY = event.getY();
             });
 
-            imageView.setOnScroll(event -> {
-                if (currentRenderer != null && !currentRenderer.getSelectedObjectIds().isEmpty()) {
-                    currentRenderer.scaleSelectedObject((float) event.getDeltaY() * 0.005f);
+        canvasPlaceholder.setOnKeyPressed(event -> {
+            if (currentRenderer != null) {
+                switch (event.getCode()) {
+                    case W: currentRenderer.moveW = true; break;
+                    case S: currentRenderer.moveS = true; break;
+                    case A: currentRenderer.moveA = true; break;
+                    case D: currentRenderer.moveD = true; break;
+                    case Q: currentRenderer.moveQ = true; break;
+                    case E: currentRenderer.moveE = true; break;
+                    default: break;
                 }
-            });
+            }
+        });
+
+        canvasPlaceholder.setOnKeyReleased(event -> {
+            if (currentRenderer != null) {
+                switch (event.getCode()) {
+                    case W: currentRenderer.moveW = false; break;
+                    case S: currentRenderer.moveS = false; break;
+                    case A: currentRenderer.moveA = false; break;
+                    case D: currentRenderer.moveD = false; break;
+                    case Q: currentRenderer.moveQ = false; break;
+                    case E: currentRenderer.moveE = false; break;
+                    default: break;
+                }
+            }
+        });
+
+        renderThread = new Thread(currentRenderer);
+        renderThread.setDaemon(true);
+        renderThread.start();
+    }
 
             renderThread = new Thread(currentRenderer);
             renderThread.setDaemon(true);
@@ -353,6 +445,17 @@
 
         private void simulateAIRestoration(Set<Integer> objectIds) {
             File aiDir=new File("ai");
+    private static String planeEquationText(Vector3f normal, Vector3f point) {
+        float d = normal.dot(point);
+        return String.format("%.3fx %+.3fy %+.3fz = %.3f", normal.x, normal.y, normal.z, d);
+    }
+
+    private void simulateAIRestoration(Set<Integer> objectIds) {
+        Alert infoAlert = new Alert(Alert.AlertType.INFORMATION);
+        infoAlert.setTitle("Comunicare AI Backend");
+        infoAlert.setHeaderText("Trimitere date catre AI");
+        infoAlert.setContentText("Asteapta te rog, se genereaza modelul 3D...");
+        infoAlert.show();
 
             File installedFile = new File(aiDir, "installed.txt");
 
@@ -521,11 +624,39 @@
             renderThread.setDaemon(true);
             renderThread.start();
 
-            Stage vaseStage = new Stage();
-            vaseStage.setTitle("Rezultat Reconstructie AI");
-            vaseStage.setScene(new Scene(root, viewSize, viewSize));
-            vaseStage.setOnCloseRequest(e -> renderThread.interrupt());
-            vaseStage.show();
+    private String formatClassification(SherdPythonAnalyzer.SherdAnalysisResult r) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Forma: ").append(r.formClass());
+        if ("unknown".equals(r.formClass())) {
+            sb.append(" (sherdtool.py nu calculeaza inca aceasta eticheta)");
+        }
+        sb.append('\n');
+        sb.append(String.format("Calitate fit: %s%n", r.quality()));
+        sb.append(String.format("Vertecsi / fete: %d / %d%n", r.nVertices(), r.nFaces()));
+        sb.append(String.format("Unitate: %s%n", r.unit()));
+        sb.append(String.format("Inaltime pastrata: %.3f%n", r.preservedHeight()));
+        sb.append(String.format("Diametru buza: %.3f%n", r.rimDiameter()));
+        sb.append(String.format("Diametru maxim: %.3f%n", r.maxDiameter()));
+        sb.append(String.format("Inaltime umar: %.3f%n", r.shoulderHeight()));
+        sb.append(String.format("Arc pastrat: %.1f°%n", r.preservedArcDeg()));
+        sb.append(String.format("Azimut sectiune: %.1f°%n", r.sectionAzimuthDeg()));
+        sb.append(String.format("RMSE fit axa: %.4f%n", r.fitResidualRmse()));
+        sb.append("Axa: ").append(r.axisDir()).append(" @ ").append(r.axisPoint()).append('\n');
+        sb.append("Extent bbox: ").append(r.bboxExtent());
+        if (r.notes() != null && !r.notes().isBlank()) {
+            sb.append("\nNote: ").append(r.notes());
+        }
+        return sb.toString();
+    }
+
+    private void openObjectWindow(int objectId)
+    {
+        Stage existing = openObjectWindows.get(objectId);
+        if (existing != null)
+        {
+            existing.toFront();
+            existing.requestFocus();
+            return;
         }
 
         private void openObjectWindow(int objectId)
@@ -537,6 +668,9 @@
                 existing.requestFocus();
                 return;
             }
+        }
+        if (target == null) return;
+        final String meshSourcePath = target.getSourcePath();
 
             SceneObject target = null;
             for (SceneObject obj : currentRenderer.objects)
@@ -602,8 +736,23 @@
             intCheck.setStyle("-fx-text-fill: white;");
             intCheck.setOnAction(e -> objectRenderer.setShowInterior(intCheck.isSelected()));
 
-            Label widthLabel = new Label("Latime estimata: Nedeterminat");
-            widthLabel.setStyle("-fx-text-fill: #ffcc00; -fx-font-weight: bold;");
+        Label extEquationLabel = new Label("Ecuatie plan exterior: Nedeterminat");
+        extEquationLabel.setStyle("-fx-text-fill: #ff6666; -fx-font-family: monospace;");
+
+        Label intEquationLabel = new Label("Ecuatie plan interior: Nedeterminat");
+        intEquationLabel.setStyle("-fx-text-fill: #66aaff; -fx-font-family: monospace;");
+
+        Label spreadLabel = new Label("Distantare stanga/dreapta");
+        spreadLabel.setStyle("-fx-text-fill: white;");
+        Slider spreadSlider = new Slider(0, 0.6, 0.15);
+        spreadSlider.valueProperty().addListener((obs, oldVal, newVal) ->
+                objectRenderer.setCurvatureSpread(newVal.floatValue()));
+
+        computeButton.setOnAction(e -> {
+            computeButton.setText("Se calculeaza...");
+            computeButton.setDisable(true);
+            objectRenderer.requestComputeCurvature();
+        });
 
             computeButton.setOnAction(e -> {
                 computeButton.setText("Se calculeaza...");
@@ -615,6 +764,12 @@
                 computeButton.setText("Curbura calculata");
                 extCheck.setDisable(false);
                 intCheck.setDisable(false);
+            float distance = result.exteriorPlanePoint.distance(result.interiorPlanePoint);
+            widthLabel.setText(String.format("Latime estimata: %.3f unitati", distance));
+
+            extEquationLabel.setText("Exterior: " + planeEquationText(result.exteriorPlaneNormal, result.exteriorPlanePoint));
+            intEquationLabel.setText("Interior: " + planeEquationText(result.interiorPlaneNormal, result.interiorPlanePoint));
+        });
 
                 float distance = result.exteriorPlanePoint.distance(result.interiorPlanePoint);
                 widthLabel.setText(String.format("Latime estimata: %.3f unitati", distance));
@@ -638,6 +793,35 @@
                 objectRenderer.requestComputeCrossSection();
                 objectRenderer.requestTopViewCapture();
             });
+        Label l1 = new Label("Sectiune 2D orizontala"); l1.setStyle("-fx-text-fill: white;");
+        Label l2 = new Label("Sectiune verticala"); l2.setStyle("-fx-text-fill: white;");
+        Label l3 = new Label("Pozitie plan"); l3.setStyle("-fx-text-fill: white;");
+
+        VBox curvatureControls = new VBox(8, computeButton, extCheck, intCheck, widthLabel,
+                extEquationLabel, intEquationLabel, spreadLabel, spreadSlider);
+        curvatureControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
+
+        VBox crossSectionControls = new VBox(8,
+                l1, yawSlider,
+                l2, pitchSlider,
+                l3, offsetSlider,
+                cutButton);
+        crossSectionControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
+
+        Button aiButton = new Button("Genereaza Vas (AI)");
+        aiButton.setStyle("-fx-background-color: #8a2be2; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        aiButton.setMaxWidth(Double.MAX_VALUE);
+        aiButton.setOnAction(e -> {
+            if (!SessionDatabase.hasSection(objectId)) {
+                Alert err = new Alert(Alert.AlertType.ERROR);
+                err.setTitle("Sectiune lipsa");
+                err.setHeaderText("Nu ai salvat nicio sectiune!");
+                err.setContentText("Te rog sa decupezi si sa salvezi sectiunea inainte de a genera vasul.");
+                err.showAndWait();
+                return;
+            }
+            simulateAIRestoration(Set.of(objectId));
+        });
 
             Label l1 = new Label("Sectiune 2D orizontala"); l1.setStyle("-fx-text-fill: white;");
             Label l2 = new Label("Sectiune verticala"); l2.setStyle("-fx-text-fill: white;");
@@ -668,8 +852,49 @@
                 simulateAIRestoration(Set.of(objectId));
             });
 
-            VBox aiControls = new VBox(8, aiButton);
-            aiControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
+        Button classifyButton = new Button("Clasifica ciob (Python)");
+        classifyButton.setStyle("-fx-background-color: #e07b00; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        classifyButton.setMaxWidth(Double.MAX_VALUE);
+
+        TextArea classifyResultArea = new TextArea("Apasa butonul pentru a rula analiza sherdtool.py pe acest ciob.");
+        classifyResultArea.setEditable(false);
+        classifyResultArea.setWrapText(true);
+        classifyResultArea.setPrefRowCount(9);
+        classifyResultArea.setStyle("-fx-control-inner-background: #2b2b2b; -fx-text-fill: #dddddd; -fx-font-family: monospace;");
+
+        classifyButton.setOnAction(e -> {
+            classifyButton.setText("Se analizeaza...");
+            classifyButton.setDisable(true);
+            classifyResultArea.setText("Se ruleaza sherdtool.py, poate dura cateva zeci de secunde...");
+
+            Task<SherdPythonAnalyzer.SherdAnalysisResult> classifyTask = new Task<>() {
+                @Override
+                protected SherdPythonAnalyzer.SherdAnalysisResult call() throws Exception {
+                    return SherdPythonAnalyzer.analyze(java.nio.file.Path.of(meshSourcePath));
+                }
+            };
+            classifyTask.setOnSucceeded(ev -> {
+                classifyButton.setText("Clasifica ciob (Python)");
+                classifyButton.setDisable(false);
+                classifyResultArea.setText(formatClassification(classifyTask.getValue()));
+            });
+            classifyTask.setOnFailed(ev -> {
+                classifyButton.setText("Clasifica ciob (Python)");
+                classifyButton.setDisable(false);
+                Throwable ex = classifyTask.getException();
+                classifyResultArea.setText("Eroare: " + (ex != null ? ex.getMessage() : "necunoscuta"));
+            });
+
+            Thread classifyThread = new Thread(classifyTask);
+            classifyThread.setDaemon(true);
+            classifyThread.start();
+        });
+
+        VBox classifyControls = new VBox(8, classifyButton, classifyResultArea);
+        classifyControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
+
+        VBox controls = new VBox(15, infoBox, curvatureControls, crossSectionControls, aiControls, classifyControls);
+        controls.setStyle("-fx-padding: 15; -fx-background-color: #2b2b2b;");
 
             VBox controls = new VBox(15, infoBox, curvatureControls, crossSectionControls, aiControls);
             controls.setStyle("-fx-padding: 15; -fx-background-color: #2b2b2b;");

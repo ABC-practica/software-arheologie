@@ -26,3 +26,6 @@ __pycache__/
 ai/installed.txt
 ai/shards/
 ai/output/
+# Python (python/sherdtool.py)
+__pycache__/
+*.pyc

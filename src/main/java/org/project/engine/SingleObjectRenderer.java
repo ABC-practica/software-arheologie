@@ -36,6 +36,7 @@ public class SingleObjectRenderer implements Runnable
     private volatile boolean computeRequested = false;
     private volatile boolean showExterior = false;
     private volatile boolean showInterior = false;
+    private volatile float curvatureSpread = 0.15f;
 
     private volatile float crossSectionYaw = 0f;
     private volatile float crossSectionPitch = 0f;
@@ -67,6 +68,7 @@ public class SingleObjectRenderer implements Runnable
     public void setOnCurvatureComputed(Consumer<CurvatureClassifier.Result> callback) { this.onCurvatureComputed = callback; }
     public void setShowExterior(boolean show) { this.showExterior = show; }
     public void setShowInterior(boolean show) { this.showInterior = show; }
+    public void setCurvatureSpread(float spread) { this.curvatureSpread = spread; }
 
     public void setCrossSectionYaw(float radians) {
         this.crossSectionYaw = radians;
@@ -270,11 +272,15 @@ public class SingleObjectRenderer implements Runnable
                     overlayShader.setUniform("projection", projection);
                     overlayShader.setUniform("view", view);
 
+                    // Spread exterior/interior overlays apart left/right on screen (world-space X,
+                    // applied after the object's own rotation) so they detach visually from the
+                    // mesh instead of sitting flush on its surface.
                     if (showExterior && exteriorVertexCount > 0) {
                         GL30.glEnable(GL30.GL_POLYGON_OFFSET_FILL);
                         GL30.glPolygonOffset(-1.0f, -1.0f);
                         overlayShader.setUniform("color", new Vector4f(1.0f, 0.3f, 0.2f, 0.7f));
-                        overlayShader.setUniform("model", modelMat);
+                        Matrix4f exteriorModel = new Matrix4f().translate(curvatureSpread, 0, 0).mul(modelMat);
+                        overlayShader.setUniform("model", exteriorModel);
                         GL30.glBindVertexArray(exteriorVao);
                         GL30.glDrawArrays(GL30.GL_TRIANGLES, 0, exteriorVertexCount);
                         GL30.glDisable(GL30.GL_POLYGON_OFFSET_FILL);
@@ -284,7 +290,8 @@ public class SingleObjectRenderer implements Runnable
                         GL30.glEnable(GL30.GL_POLYGON_OFFSET_FILL);
                         GL30.glPolygonOffset(-1.0f, -1.0f);
                         overlayShader.setUniform("color", new Vector4f(0.2f, 0.6f, 1.0f, 0.7f));
-                        overlayShader.setUniform("model", modelMat);
+                        Matrix4f interiorModel = new Matrix4f().translate(-curvatureSpread, 0, 0).mul(modelMat);
+                        overlayShader.setUniform("model", interiorModel);
                         GL30.glBindVertexArray(interiorVao);
                         GL30.glDrawArrays(GL30.GL_TRIANGLES, 0, interiorVertexCount);
                         GL30.glDisable(GL30.GL_POLYGON_OFFSET_FILL);
