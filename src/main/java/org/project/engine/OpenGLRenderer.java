@@ -476,4 +476,8 @@ public class OpenGLRenderer implements Runnable
             }
         }
     }
+
+    public void zoomCamera(float amount) {
+        camPos.add(new Vector3f(camFront).mul(amount));
+    }
 }
