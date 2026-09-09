@@ -17,6 +17,15 @@ build/
 Thumbs.db
 .DS_Store
 
+# AI
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+
+ai/installed.txt
+ai/shards/
+ai/output/
 # Python (python/sherdtool.py)
 __pycache__/
 *.pyc
