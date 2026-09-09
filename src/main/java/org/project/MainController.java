@@ -323,11 +323,8 @@
                 req.redirectErrorStream(true);
                 Process reqProcess = req.start();
 
-                try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(reqProcess.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        System.out.println("[PIP LIVE] " + line);
-                    }
+                try(java.io.InputStream in = reqProcess.getInputStream()){
+                    in.readAllBytes();
                 }
 
                 reqProcess.waitFor();
@@ -485,9 +482,9 @@
                     Platform.runLater(() -> {
                         infoAlert.close();
                         Alert err = new Alert(Alert.AlertType.ERROR);
-                        err.setTitle("Eroare de Conexiune");
-                        err.setHeaderText("Nu s-a putut conecta la AI");
-                        err.setContentText("Asigura-te ca ai pornit serverul Python in fundal (pe portul 8000).");
+                        err.setTitle("Eroare de Executie");
+                        err.setHeaderText("Nu s-a putut rula AI-ul");
+                        err.setContentText("A apărut o eroare la lansarea executabilului sau scriptului Python. Asigură-te că ai permisiunile necesare și că fișierele sunt la locul lor.");
                         err.showAndWait();
                     });
                 }
