@@ -7,6 +7,15 @@ from PIL import Image
 from skimage.measure import label, regionprops, find_contours
 from skimage.transform import resize
 
+import torchvision
+import matplotlib
+import seaborn
+import sklearn
+import pandas
+import cv2
+import scipy
+import tqdm
+
 from models import CustomModel
 
 if getattr(sys, 'frozen', False):
