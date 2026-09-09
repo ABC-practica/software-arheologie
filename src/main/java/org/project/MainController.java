@@ -23,10 +23,8 @@
 
     import java.io.File;
     import java.io.IOException;
-    import java.util.HashMap;
-    import java.util.Map;
-    import java.util.Optional;
-    import java.util.Set;
+    import java.nio.charset.StandardCharsets;
+    import java.util.*;
 
     public class MainController
     {
@@ -317,7 +315,10 @@
                     infoAlert.setContentText("Se descarca librariile utilizate de AI. Te rog sa astepti");
                 });
 
-                ProcessBuilder req = new ProcessBuilder("python", "-m", "pip", "install", "-r", "requirements.txt");
+                String osName = System.getProperty("os.name").toLowerCase();
+                String pythonCall = (osName.contains("win"))?"python":"python3";
+
+                ProcessBuilder req = new ProcessBuilder(pythonCall, "-m", "pip", "install", "-r", "requirements.txt");
                 req.directory(aiDir);
                 req.redirectErrorStream(true);
                 Process reqProcess = req.start();
@@ -412,7 +413,10 @@
                     File imagePath = new File(inputDir, "shard.png");
                     ImageExporter.savePng(sectionImage, imagePath);
 
-                    File exeFile = new File(aiDir,"dist/AI/AI.exe");
+                    String osName = System.getProperty("os.name").toLowerCase();
+                    String exeName = osName.contains("win")? "AI.exe" : "AI";
+
+                    File exeFile = new File(aiDir,"dist" + File.separator + "AI" + File.separator + exeName);
                     ProcessBuilder aiProcessBuilder;
 
                     if (exeFile.exists()){
@@ -423,8 +427,9 @@
                         );
                     }
                     else{
+                        String pythonCall = osName.contains("win")?"python":"python3";
                         aiProcessBuilder = new ProcessBuilder(
-                                "python", "rotate.py",
+                                pythonCall, "rotate.py",
                                 "--input", inputDir.getAbsolutePath(),
                                 "--output", outputDir.getAbsolutePath()
                         );
@@ -436,7 +441,7 @@
 
                     Process aiProcess = aiProcessBuilder.start();
 
-                    String pythonOutput = new String(aiProcess.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                    String pythonOutput = new String(aiProcess.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
                     int aiExitCode=aiProcess.waitFor();
 
                     Platform.runLater(infoAlert::close);
