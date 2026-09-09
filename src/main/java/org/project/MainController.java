@@ -352,7 +352,28 @@
         });
     }
         }
+
         private void simulateAIRestoration(Set<Integer> objectIds) {
+            File aiDir=new File("ai");
+
+            File installedFile = new File(aiDir, "installed.txt");
+
+            if (!installedFile.exists()) {
+                Alert librariesMissingAlert = new Alert(Alert.AlertType.CONFIRMATION);
+                librariesMissingAlert.setTitle("Instalare librarii");
+                librariesMissingAlert.setHeaderText("Lipsesc librarii pentru AI");
+                librariesMissingAlert.setContentText("Pentru a genera un vas, trebuie descarcate librariile utilizate de AI (poate dura cateva minute).\nDoresti sa le instalezi?");
+                librariesMissingAlert.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
+
+                librariesMissingAlert.getButtonTypes().setAll(ButtonType.YES, ButtonType.NO);
+
+                Optional<ButtonType> result = librariesMissingAlert.showAndWait();
+
+                if (result.get() == ButtonType.NO) {
+                    return;
+                }
+            }
+
             Alert infoAlert = new Alert(Alert.AlertType.INFORMATION);
             infoAlert.setTitle("Comunicare AI Backend");
             infoAlert.setHeaderText("Trimitere date catre AI");
@@ -367,11 +388,15 @@
 
             new Thread(() -> {
                 try {
+                    if(!installedFile.exists()){
+                        installAiLibraries(aiDir, infoAlert);
+                    }
+
                     int firstId = objectIds.iterator().next();
                     WritableImage sectionImage = SessionDatabase.getSection(firstId);
 
                     String userHome = System.getProperty("user.home");
-                    File safeDataDir= new File(userHome, ".sofware-arheologie");
+                    File safeDataDir= new File(userHome, ".software-arheologie");
 
                     File inputDir = new File(safeDataDir,"shards");
                     File outputDir = new File(safeDataDir,"output");
@@ -387,13 +412,24 @@
                     File imagePath = new File(inputDir, "shard.png");
                     ImageExporter.savePng(sectionImage, imagePath);
 
-                    File aiDir = new File("ai");
+                    File exeFile = new File(aiDir,"dist/AI/AI.exe");
+                    ProcessBuilder aiProcessBuilder;
 
-                    ProcessBuilder aiProcessBuilder = new ProcessBuilder(
-                            "python", "rotate.py",
-                            "--input", inputDir.getAbsolutePath(),
-                            "--output", outputDir.getAbsolutePath()
-                    );
+                    if (exeFile.exists()){
+                        aiProcessBuilder = new ProcessBuilder(
+                                exeFile.getAbsolutePath(),
+                                "--input", inputDir.getAbsolutePath(),
+                                "--output", outputDir.getAbsolutePath()
+                        );
+                    }
+                    else{
+                        aiProcessBuilder = new ProcessBuilder(
+                                "python", "rotate.py",
+                                "--input", inputDir.getAbsolutePath(),
+                                "--output", outputDir.getAbsolutePath()
+                        );
+                    }
+
 
                     aiProcessBuilder.redirectErrorStream(true);
                     aiProcessBuilder.directory(aiDir);
@@ -411,11 +447,20 @@
                         }
                     }
                     else{
+                        boolean isMissingLibrary = pythonOutput.contains("ModuleNotFound")|| pythonOutput.contains("ImportError");
+
                         Platform.runLater(() -> {
-                            Alert err = new Alert(Alert.AlertType.ERROR);
-                            err.setTitle("Eroare Script Python");
-                            err.setHeaderText("AI-ul a returnat o eroare!");
-                            err.setContentText("Extinde sectiune de mai jos pentru a vedea detalii");
+                            if(isMissingLibrary) {
+                                if (installedFile.exists()) {
+                                    installedFile.delete();
+                                }
+                                simulateAIRestoration(objectIds);
+                            }
+                            else {
+                                Alert err = new Alert(Alert.AlertType.ERROR);
+                                err.setTitle("Eroare Script Python");
+                                err.setHeaderText("AI-ul a returnat o eroare!");
+                                err.setContentText("Extinde sectiune de mai jos pentru a vedea detalii");
 
                             TextArea textArea = new TextArea(pythonOutput);
                             textArea.setEditable(false);
@@ -425,7 +470,8 @@
                             err.getDialogPane().setExpandableContent(textArea);
                             err.getDialogPane().setExpanded(false);
 
-                            err.showAndWait();
+                                err.showAndWait();
+                            }
                         });
                     }
 
