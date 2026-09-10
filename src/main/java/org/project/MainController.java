@@ -400,10 +400,6 @@ public class MainController {
         }
     }
 
-    private static String planeEquationText(Vector3f normal, Vector3f point) {
-        float d = normal.dot(point);
-        return String.format("%.3fx %+.3fy %+.3fz = %.3f", normal.x, normal.y, normal.z, d);
-    }
 
     private void simulateAIRestoration(Set<Integer> objectIds) {
         File aiDir = new File("ai");
@@ -675,11 +671,13 @@ public class MainController {
         Label widthLabel = new Label("Latime estimata: Nedeterminat");
         widthLabel.setStyle("-fx-text-fill: #ffcc00; -fx-font-weight: bold;");
 
-        Label extEquationLabel = new Label("Ecuatie plan exterior: Nedeterminat");
+        Label extEquationLabel = new Label("Ecuatie suprafata exterior (grad 2): Nedeterminat");
         extEquationLabel.setStyle("-fx-text-fill: #ff6666; -fx-font-family: monospace;");
+        extEquationLabel.setWrapText(true);
 
-        Label intEquationLabel = new Label("Ecuatie plan interior: Nedeterminat");
+        Label intEquationLabel = new Label("Ecuatie suprafata interior (grad 2): Nedeterminat");
         intEquationLabel.setStyle("-fx-text-fill: #66aaff; -fx-font-family: monospace;");
+        intEquationLabel.setWrapText(true);
 
         Label spreadLabel = new Label("Distantare stanga/dreapta");
         spreadLabel.setStyle("-fx-text-fill: white;");
@@ -701,8 +699,8 @@ public class MainController {
             float distance = result.exteriorPlanePoint.distance(result.interiorPlanePoint);
             widthLabel.setText(String.format("Latime estimata: %.3f unitati", distance));
 
-            extEquationLabel.setText("Exterior: " + planeEquationText(result.exteriorPlaneNormal, result.exteriorPlanePoint));
-            intEquationLabel.setText("Interior: " + planeEquationText(result.interiorPlaneNormal, result.interiorPlanePoint));
+            extEquationLabel.setText("Exterior: " + result.exteriorQuadric.toEquationText());
+            intEquationLabel.setText("Interior: " + result.interiorQuadric.toEquationText());
         });
 
         Slider yawSlider = new Slider(0, 360, 0);
