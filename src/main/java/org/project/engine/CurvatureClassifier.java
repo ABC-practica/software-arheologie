@@ -3,6 +3,7 @@ package org.project.engine;
 import org.joml.Vector3f;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class CurvatureClassifier {
 
@@ -29,7 +30,10 @@ public class CurvatureClassifier {
         }
 
         public String toEquationText() {
-            return String.format(
+            // Locale.ROOT: mereu "." ca separator zecimal, indiferent de limba sistemului
+            // (altfel, pe un JVM cu locale romanesc, String.format produce virgula si
+            // ecuatia devine ambigua/neparsabila - "0,1234x² +0,5xy" etc.).
+            return String.format(Locale.ROOT,
                     "%.4fx² %+.4fy² %+.4fz² %+.4fxy %+.4fyz %+.4fxz %+.4fx %+.4fy %+.4fz %+.4f = 0",
                     x2, y2, z2, xy, yz, xz, x, y, z, c);
         }
