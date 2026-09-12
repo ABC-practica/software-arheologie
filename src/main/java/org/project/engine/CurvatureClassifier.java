@@ -39,6 +39,29 @@ public class CurvatureClassifier {
         }
     }
 
+    /**
+     * A guess at the axis of rotation (and radius) of the whole vessel this sherd was part
+     * of, derived from the exterior wall's curvature alone: the tangent direction with the
+     * SMALLEST curvature is taken as the vessel's axis direction (a body-of-revolution wall
+     * is typically far more curved circumferentially than along its height/meridian), and
+     * the OTHER tangent direction's curvature gives the circumferential radius. Purely a
+     * local heuristic - reliable is false when the wall was too flat/small to say anything
+     * (in that case axisDirection/axisPoint/radius still hold a non-crashing fallback guess).
+     */
+    public static class VesselAxisEstimate {
+        public final Vector3f axisDirection;
+        public final Vector3f axisPoint;
+        public final float radius;
+        public final boolean reliable;
+
+        VesselAxisEstimate(Vector3f axisDirection, Vector3f axisPoint, float radius, boolean reliable) {
+            this.axisDirection = axisDirection;
+            this.axisPoint = axisPoint;
+            this.radius = radius;
+            this.reliable = reliable;
+        }
+    }
+
     public static class Result {
         public final float[] exteriorTriangles;
         public final float[] interiorTriangles;
@@ -48,11 +71,13 @@ public class CurvatureClassifier {
         public final Vector3f interiorPlanePoint;
         public final QuadricSurface exteriorQuadric;
         public final QuadricSurface interiorQuadric;
+        public final VesselAxisEstimate exteriorAxisEstimate;
 
         Result(float[] exteriorTriangles, float[] interiorTriangles,
                Vector3f exteriorPlaneNormal, Vector3f exteriorPlanePoint,
                Vector3f interiorPlaneNormal, Vector3f interiorPlanePoint,
-               QuadricSurface exteriorQuadric, QuadricSurface interiorQuadric) {
+               QuadricSurface exteriorQuadric, QuadricSurface interiorQuadric,
+               VesselAxisEstimate exteriorAxisEstimate) {
             this.exteriorTriangles = exteriorTriangles;
             this.interiorTriangles = interiorTriangles;
             this.exteriorPlaneNormal = exteriorPlaneNormal;
@@ -61,6 +86,7 @@ public class CurvatureClassifier {
             this.interiorPlanePoint = interiorPlanePoint;
             this.exteriorQuadric = exteriorQuadric;
             this.interiorQuadric = interiorQuadric;
+            this.exteriorAxisEstimate = exteriorAxisEstimate;
         }
     }
 
@@ -106,8 +132,9 @@ public class CurvatureClassifier {
         }
 
         if (maxAreaIdx == -1) {
+            VesselAxisEstimate emptyAxis = new VesselAxisEstimate(new Vector3f(0, 1, 0), new Vector3f(), 0f, false);
             return new Result(new float[0], new float[0], new Vector3f(), new Vector3f(), new Vector3f(), new Vector3f(),
-                    QuadricSurface.zero(), QuadricSurface.zero());
+                    QuadricSurface.zero(), QuadricSurface.zero(), emptyAxis);
         }
 
         Vector3f refNormal = normals[maxAreaIdx];
@@ -176,13 +203,32 @@ public class CurvatureClassifier {
         Vector3f interiorNormal = isAExterior ? meanB : meanA;
         Vector3f interiorPoint = isAExterior ? centroidB : centroidA;
 
-        QuadricSurface quadricA = fitQuadricSurface(sampleCentroidsA, sampleWeightsA, meanA, centroidA);
-        QuadricSurface quadricB = fitQuadricSurface(sampleCentroidsB, sampleWeightsB, meanB, centroidB);
-        QuadricSurface exteriorQuadric = isAExterior ? quadricA : quadricB;
-        QuadricSurface interiorQuadric = isAExterior ? quadricB : quadricA;
+        WallFit fitA = fitWall(sampleCentroidsA, sampleWeightsA, meanA, centroidA);
+        WallFit fitB = fitWall(sampleCentroidsB, sampleWeightsB, meanB, centroidB);
+        QuadricSurface exteriorQuadric = (isAExterior ? fitA : fitB).quadric;
+        QuadricSurface interiorQuadric = (isAExterior ? fitB : fitA).quadric;
+        VesselAxisEstimate exteriorAxisEstimate = estimateVesselAxis(isAExterior ? fitA : fitB);
 
         return new Result(exteriorTriangles, interiorTriangles, exteriorNormal, exteriorPoint, interiorNormal, interiorPoint,
-                exteriorQuadric, interiorQuadric);
+                exteriorQuadric, interiorQuadric, exteriorAxisEstimate);
+    }
+
+    /** Local Monge-patch fit for one wall, kept around (not just the expanded global quadric)
+     * because estimateVesselAxis needs the LOCAL curvature coefficients A,B,C and tangent axes -
+     * the global x,y,z quadric alone can't be un-mixed back into "curvature along which direction". */
+    private static class WallFit {
+        final QuadricSurface quadric;
+        final Vector3f origin, uAxis, vAxis, nAxis;
+        final double A, B, C;
+        final boolean fitted;
+
+        WallFit(QuadricSurface quadric, Vector3f origin, Vector3f uAxis, Vector3f vAxis, Vector3f nAxis,
+                double A, double B, double C, boolean fitted) {
+            this.quadric = quadric;
+            this.origin = origin; this.uAxis = uAxis; this.vAxis = vAxis; this.nAxis = nAxis;
+            this.A = A; this.B = B; this.C = C;
+            this.fitted = fitted;
+        }
     }
 
     /**
@@ -191,8 +237,8 @@ public class CurvatureClassifier {
      * quadric in x,y,z. Falls back to the flat plane (h=0) when there are too few samples or
      * the least-squares system is singular (e.g. all samples share the same u,v).
      */
-    private static QuadricSurface fitQuadricSurface(List<Vector3f> points, List<Float> weights,
-                                                      Vector3f normal, Vector3f origin) {
+    private static WallFit fitWall(List<Vector3f> points, List<Float> weights,
+                                    Vector3f normal, Vector3f origin) {
         Vector3f nAxis = new Vector3f(normal);
         if (nAxis.lengthSquared() < 1e-12f) nAxis.set(0, 0, 1); else nAxis.normalize();
 
@@ -223,14 +269,57 @@ public class CurvatureClassifier {
 
             double[] coeffs = solveLinearSystem(ata, atb);
             if (coeffs != null) {
-                return buildGlobalQuadric(origin, uAxis, vAxis, nAxis,
+                QuadricSurface q = buildGlobalQuadric(origin, uAxis, vAxis, nAxis,
                         coeffs[0], coeffs[1], coeffs[2], coeffs[3], coeffs[4], coeffs[5]);
+                return new WallFit(q, origin, uAxis, vAxis, nAxis, coeffs[0], coeffs[1], coeffs[2], true);
             }
         }
 
         // Too few samples (or a degenerate/singular fit): flat plane, still expressed as
         // a (degree-2, all-curvature-terms-zero) quadric so the equation format stays uniform.
-        return buildGlobalQuadric(origin, uAxis, vAxis, nAxis, 0, 0, 0, 0, 0, 0);
+        QuadricSurface flat = buildGlobalQuadric(origin, uAxis, vAxis, nAxis, 0, 0, 0, 0, 0, 0);
+        return new WallFit(flat, origin, uAxis, vAxis, nAxis, 0, 0, 0, false);
+    }
+
+    /**
+     * Diagonalizes the 2x2 local curvature (Hessian) matrix [[A, C/2], [C/2, B]] in closed form
+     * (standard principal-axis rotation, same idea as principal moments of inertia) to find the
+     * two tangent directions where the surface curves the LEAST and the MOST. The low-curvature
+     * direction is the vessel's guessed axis of rotation; the high-curvature magnitude gives the
+     * circumferential radius (R = 1 / (2*|curvature|), from the local parabola h ~= curvature*u²
+     * that a cylinder of radius R traces out). The axis itself sits one radius inward from the
+     * wall sample, along the wall's own outward normal - a point at distance R from an outward-
+     * facing wall point, in the -normal direction, is exactly the cylinder's central axis.
+     */
+    private static VesselAxisEstimate estimateVesselAxis(WallFit fit) {
+        double avg = (fit.A + fit.B) / 2.0;
+        double diff = (fit.A - fit.B) / 2.0;
+        double cc = fit.C / 2.0;
+        double spread = Math.sqrt(diff * diff + cc * cc);
+        double lambda1 = avg + spread;
+        double lambda2 = avg - spread;
+        double theta = 0.5 * Math.atan2(2 * cc, fit.A - fit.B);
+
+        Vector3f dir1 = new Vector3f(fit.uAxis).mul((float) Math.cos(theta))
+                .add(new Vector3f(fit.vAxis).mul((float) Math.sin(theta)));
+        Vector3f dir2 = new Vector3f(fit.uAxis).mul((float) -Math.sin(theta))
+                .add(new Vector3f(fit.vAxis).mul((float) Math.cos(theta)));
+
+        boolean dir1IsFlatter = Math.abs(lambda1) < Math.abs(lambda2);
+        Vector3f axisDirection = new Vector3f(dir1IsFlatter ? dir1 : dir2).normalize();
+        double circumferentialCurvature = dir1IsFlatter ? lambda2 : lambda1;
+
+        float minCurvature = 1e-4f;
+        if (!fit.fitted || Math.abs(circumferentialCurvature) < minCurvature) {
+            // No usable curvature signal (flat/too-small wall) - fall back to a guess that at
+            // least renders something sane: axis along the found (or default) tangent direction,
+            // centered on the wall sample itself, with a generic radius.
+            return new VesselAxisEstimate(axisDirection, new Vector3f(fit.origin), 5.0f, false);
+        }
+
+        float radius = (float) (1.0 / (2.0 * Math.abs(circumferentialCurvature)));
+        Vector3f axisPoint = new Vector3f(fit.origin).sub(new Vector3f(fit.nAxis).mul(radius));
+        return new VesselAxisEstimate(axisDirection, axisPoint, radius, true);
     }
 
     private static void buildTangentBasis(Vector3f n, Vector3f outU, Vector3f outV) {

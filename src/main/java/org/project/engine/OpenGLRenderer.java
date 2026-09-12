@@ -47,6 +47,14 @@ public class OpenGLRenderer implements Runnable
     private final Set<Integer> selectedObjectIds = ConcurrentHashMap.newKeySet();
     private Consumer<Set<Integer>> onSelectionChanged;
 
+    // Cercuri (sus/mijloc/jos) + axa de rotatie estimata pt obiectul unic selectat -
+    // vezi updateAxisOverlay(). Geometria e in spatiul local al mesh-ului selectat, ca
+    // sa se miste automat cu el (desenata cu obj.getModelMatrix() ca model matrix).
+    private int axisOverlayObjectId = -1;
+    private int axisOverlayVao = -1;
+    private int axisOverlayVbo = -1;
+    private int axisOverlayVertexCount = 0;
+
     private volatile float yaw = -90.0f;
     private volatile float pitch = -15.0f;
     private volatile Vector3f camPos = new Vector3f(0.0f, 2.0f, 5.0f);
@@ -93,6 +101,114 @@ public class OpenGLRenderer implements Runnable
         if (onSelectionChanged != null) {
             Platform.runLater(() -> onSelectionChanged.accept(new HashSet<>()));
         }
+    }
+
+    /**
+     * Recomputes the 3-circles-and-axis overlay for whichever single object is currently
+     * selected (no-op, and hides the overlay via the draw-time selection check, if 0 or
+     * 2+ objects are selected). Must run on the render thread (uses GL calls directly) -
+     * called from run()'s own loop right after a selection-changing click.
+     */
+    private void updateAxisOverlay() {
+        if (selectedObjectIds.size() != 1) return;
+        int id = selectedObjectIds.iterator().next();
+        if (id == axisOverlayObjectId) return;
+
+        SceneObject target = null;
+        for (SceneObject obj : objects) {
+            if (obj.getId() == id && obj.parent == null && !obj.isSectionBox) {
+                target = obj;
+                break;
+            }
+        }
+        if (target == null) return;
+
+        try {
+            float[] positions = target.getMesh().getPositions();
+            int[] indices = target.getMesh().getIndices();
+            CurvatureClassifier.Result result = CurvatureClassifier.classify(positions, indices);
+            float[] lineData = buildAxisOverlayGeometry(positions, result.exteriorAxisEstimate);
+            uploadAxisOverlay(lineData);
+            axisOverlayObjectId = id;
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void uploadAxisOverlay(float[] lineData) {
+        if (axisOverlayVao != -1) {
+            GL30.glDeleteVertexArrays(axisOverlayVao);
+            GL30.glDeleteBuffers(axisOverlayVbo);
+        }
+        axisOverlayVao = GL30.glGenVertexArrays();
+        axisOverlayVbo = GL30.glGenBuffers();
+        GL30.glBindVertexArray(axisOverlayVao);
+        GL30.glBindBuffer(GL30.GL_ARRAY_BUFFER, axisOverlayVbo);
+        FloatBuffer buf = MemoryUtil.memAllocFloat(lineData.length);
+        buf.put(lineData).flip();
+        GL30.glBufferData(GL30.GL_ARRAY_BUFFER, buf, GL30.GL_STATIC_DRAW);
+        GL30.glVertexAttribPointer(0, 3, GL30.GL_FLOAT, false, 0, 0);
+        GL30.glEnableVertexAttribArray(0);
+        MemoryUtil.memFree(buf);
+        GL30.glBindVertexArray(0);
+        axisOverlayVertexCount = lineData.length / 3;
+    }
+
+    /**
+     * Builds a GL_LINES vertex list (in the mesh's own local space) for 3 parallel circles
+     * (bottom/middle/top) around the estimated vessel axis, plus one line segment through
+     * their centers. The circles span the sherd's own extent along the axis, plus a margin
+     * on both ends to visually suggest "this is where the rest of the vessel would continue".
+     */
+    static float[] buildAxisOverlayGeometry(float[] positions, CurvatureClassifier.VesselAxisEstimate axis) {
+        Vector3f dir = new Vector3f(axis.axisDirection);
+        if (dir.lengthSquared() < 1e-12f) dir.set(0, 1, 0); else dir.normalize();
+
+        float tMin = Float.MAX_VALUE, tMax = -Float.MAX_VALUE;
+        Vector3f v = new Vector3f();
+        for (int i = 0; i + 2 < positions.length; i += 3) {
+            v.set(positions[i], positions[i + 1], positions[i + 2]).sub(axis.axisPoint);
+            float t = v.dot(dir);
+            if (t < tMin) tMin = t;
+            if (t > tMax) tMax = t;
+        }
+        if (tMin > tMax) { tMin = 0; tMax = 0; }
+        float span = tMax - tMin;
+        float margin = Math.max(span * 0.3f, axis.radius * 0.3f);
+        float bottomT = tMin - margin, midT = (tMin + tMax) / 2f, topT = tMax + margin;
+
+        Vector3f helper = Math.abs(dir.x) < 0.9f ? new Vector3f(1, 0, 0) : new Vector3f(0, 1, 0);
+        Vector3f u = new Vector3f(helper).sub(new Vector3f(dir).mul(helper.dot(dir)));
+        if (u.lengthSquared() < 1e-12f) u.set(0, 0, 1);
+        u.normalize();
+        Vector3f w = new Vector3f(dir).cross(u).normalize();
+
+        int segments = 48;
+        List<Float> verts = new ArrayList<>();
+        for (float t : new float[]{bottomT, midT, topT}) {
+            Vector3f center = new Vector3f(axis.axisPoint).add(new Vector3f(dir).mul(t));
+            for (int i = 0; i < segments; i++) {
+                double a0 = 2 * Math.PI * i / segments;
+                double a1 = 2 * Math.PI * (i + 1) / segments;
+                Vector3f p0 = new Vector3f(center)
+                        .add(new Vector3f(u).mul((float) Math.cos(a0) * axis.radius))
+                        .add(new Vector3f(w).mul((float) Math.sin(a0) * axis.radius));
+                Vector3f p1 = new Vector3f(center)
+                        .add(new Vector3f(u).mul((float) Math.cos(a1) * axis.radius))
+                        .add(new Vector3f(w).mul((float) Math.sin(a1) * axis.radius));
+                verts.add(p0.x); verts.add(p0.y); verts.add(p0.z);
+                verts.add(p1.x); verts.add(p1.y); verts.add(p1.z);
+            }
+        }
+
+        Vector3f bottomCenter = new Vector3f(axis.axisPoint).add(new Vector3f(dir).mul(bottomT));
+        Vector3f topCenter = new Vector3f(axis.axisPoint).add(new Vector3f(dir).mul(topT));
+        verts.add(bottomCenter.x); verts.add(bottomCenter.y); verts.add(bottomCenter.z);
+        verts.add(topCenter.x); verts.add(topCenter.y); verts.add(topCenter.z);
+
+        float[] result = new float[verts.size()];
+        for (int i = 0; i < result.length; i++) result[i] = verts.get(i);
+        return result;
     }
 
     public void updateCameraLook(float deltaX, float deltaY) {
@@ -310,6 +426,21 @@ public class OpenGLRenderer implements Runnable
                 GL30.glDrawArrays(GL30.GL_LINES, 0, gridData.length / 3);
                 GL30.glBindVertexArray(0);
 
+                if (axisOverlayVao != -1 && selectedObjectIds.size() == 1 && selectedObjectIds.contains(axisOverlayObjectId)) {
+                    for (SceneObject obj : objects) {
+                        if (obj.getId() == axisOverlayObjectId) {
+                            overlayShader.setUniform("model", obj.getModelMatrix());
+                            overlayShader.setUniform("color", new Vector4f(1.0f, 0.85f, 0.1f, 0.9f));
+                            GL30.glLineWidth(2.0f);
+                            GL30.glBindVertexArray(axisOverlayVao);
+                            GL30.glDrawArrays(GL30.GL_LINES, 0, axisOverlayVertexCount);
+                            GL30.glBindVertexArray(0);
+                            GL30.glLineWidth(1.0f);
+                            break;
+                        }
+                    }
+                }
+
                 overlayShader.unbind();
                 GL30.glDisable(GL30.GL_BLEND);
 
@@ -367,9 +498,12 @@ public class OpenGLRenderer implements Runnable
                         }
                     }
 
-                    if (changed && onSelectionChanged != null) {
-                        Set<Integer> copy = new HashSet<>(selectedObjectIds);
-                        Platform.runLater(() -> onSelectionChanged.accept(copy));
+                    if (changed) {
+                        updateAxisOverlay();
+                        if (onSelectionChanged != null) {
+                            Set<Integer> copy = new HashSet<>(selectedObjectIds);
+                            Platform.runLater(() -> onSelectionChanged.accept(copy));
+                        }
                     }
                     GL30.glReadBuffer(GL30.GL_COLOR_ATTACHMENT0);
                 }
