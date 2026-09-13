@@ -10,6 +10,7 @@ import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.image.ImageView;
 import javafx.scene.image.WritableImage;
+import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
@@ -28,6 +29,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -242,23 +244,7 @@ public class MainController {
         renderThread.start();
     }
 
-    private void onSelectionChanged(Set<Integer> objectIds) {
-        Set<Integer> filteredIds = new HashSet<>();
-        for (int id : objectIds) {
-            if (currentRenderer != null && !currentRenderer.isSectionObject(id)) {
-                filteredIds.add(id);
-            }
-        }
-        if (filteredIds.isEmpty()) {
-            selectionPopup.hide();
-            return;
-        }
-
-        VBox content = new VBox(8);
-        content.setStyle("-fx-background-color: #2b2b2b; -fx-padding: 10; -fx-border-color: #555; -fx-border-width: 1; -fx-border-radius: 3; -fx-background-radius: 3;");
-
-        Label label = new Label(filteredIds.size() == 1 ? "Obiect #" + filteredIds.iterator().next() : filteredIds.size() + " Fragmente Selectate");
-        label.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
+    private Button createCloseBtn() {
         Button closeBtn = new Button("X");
         closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #aaaaaa; -fx-font-weight: bold; -fx-cursor: hand;");
         closeBtn.setOnAction(e -> {
@@ -267,10 +253,85 @@ public class MainController {
         });
         closeBtn.setOnMouseEntered(e -> closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;"));
         closeBtn.setOnMouseExited(e -> closeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #aaaaaa; -fx-font-weight: bold; -fx-cursor: hand;"));
+        return closeBtn;
+    }
+
+    private void onSelectionChanged(Set<Integer> objectIds) {
+        if (currentRenderer == null) return;
+
+        Set<Integer> filteredIds = new HashSet<>();
+        SceneObject selectedSection = null;
+
+        for (int id : objectIds) {
+            SceneObject obj = currentRenderer.getObjectById(id);
+            if (obj != null) {
+                if (obj.isSectionBox) {
+                    selectedSection = obj;
+                } else if (!"MARKER_NW".equals(obj.getSourcePath())) {
+                    filteredIds.add(id);
+                }
+            }
+        }
+
+        if (filteredIds.isEmpty() && selectedSection == null) {
+            selectionPopup.hide();
+            return;
+        }
+
+        VBox content = new VBox(8);
+        content.setStyle("-fx-background-color: #2b2b2b; -fx-padding: 10; -fx-border-color: #555; -fx-border-width: 1; -fx-border-radius: 3; -fx-background-radius: 3;");
+
+        if (selectedSection != null && filteredIds.isEmpty()) {
+            Label label = new Label("Sectiune Arheologica");
+            label.setStyle("-fx-text-fill: #00ffcc; -fx-font-weight: bold;");
+
+            Region spacer = new Region();
+            HBox.setHgrow(spacer, Priority.ALWAYS);
+            HBox header = new HBox(label, spacer, createCloseBtn());
+            header.setAlignment(Pos.CENTER_LEFT);
+            header.setPrefWidth(180);
+            content.getChildren().add(header);
+
+            Button addShardBtn = new Button("Adauga Ciob Nou");
+            addShardBtn.setStyle("-fx-background-color: #28a745; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+            addShardBtn.setMaxWidth(Double.MAX_VALUE);
+            SceneObject finalSelectedSection = selectedSection;
+            addShardBtn.setOnAction(e -> {
+                selectionPopup.hide();
+                openAddShardToSectionDialog(finalSelectedSection);
+            });
+
+            Button deselectButton = new Button("Deselecteaza");
+            deselectButton.setMaxWidth(Double.MAX_VALUE);
+            deselectButton.setStyle("-fx-background-color: #6c757d; -fx-text-fill: white; -fx-cursor: hand;");
+            deselectButton.setOnAction(e -> {
+                selectionPopup.hide();
+                currentRenderer.clearSelection();
+            });
+
+            Button deleteButton = new Button("Sterge Sectiunea");
+            deleteButton.setMaxWidth(Double.MAX_VALUE);
+            deleteButton.setStyle("-fx-background-color: #d9534f; -fx-text-fill: white; -fx-cursor: hand;");
+            int sectionId = selectedSection.getId();
+            deleteButton.setOnAction(e -> {
+                selectionPopup.hide();
+                currentRenderer.queueDeleteObject(sectionId);
+            });
+
+            content.getChildren().addAll(addShardBtn, deselectButton, deleteButton);
+
+            selectionPopup.getContent().setAll(content);
+            Stage ownerWindow = (Stage) canvasPlaceholder.getScene().getWindow();
+            selectionPopup.show(ownerWindow, lastClickScreenX, lastClickScreenY);
+            return;
+        }
+
+        Label label = new Label(filteredIds.size() == 1 ? "Obiect #" + filteredIds.iterator().next() : filteredIds.size() + " Fragmente Selectate");
+        label.setStyle("-fx-text-fill: white; -fx-font-weight: bold;");
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        HBox header = new HBox(label, spacer, closeBtn);
+        HBox header = new HBox(label, spacer, createCloseBtn());
         header.setAlignment(Pos.CENTER_LEFT);
         header.setPrefWidth(180);
         content.getChildren().add(header);
@@ -355,6 +416,90 @@ public class MainController {
         selectionPopup.getContent().setAll(content);
         Stage ownerWindow = (Stage) canvasPlaceholder.getScene().getWindow();
         selectionPopup.show(ownerWindow, lastClickScreenX, lastClickScreenY);
+    }
+
+    private void openAddShardToSectionDialog(SceneObject sectionBox) {
+        Dialog<Void> dialog = new Dialog<>();
+        dialog.setTitle("Adauga Ciob in Sectiune");
+        dialog.setHeaderText("Alege fisierul 3D si introdu coordonatele.\nRotatiile trebuie introduse in grade.");
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+
+        TextField fileField = new TextField();
+        fileField.setEditable(false);
+        Button browseBtn = new Button("Cauta...");
+
+        TextField pxField = new TextField("0.0");
+        TextField pyField = new TextField("0.0");
+        TextField pzField = new TextField("0.0");
+
+        TextField rxField = new TextField("0.0");
+        TextField ryField = new TextField("0.0");
+        TextField rzField = new TextField("0.0");
+
+        TextField scaleField = new TextField("0.15");
+
+        File[] selectedFile = new File[1];
+
+        browseBtn.setOnAction(e -> {
+            FileChooser fc = new FileChooser();
+            fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("Modele 3D", "*.obj", "*.glb", "*.gltf"));
+            File f = fc.showOpenDialog(dialog.getOwner());
+            if (f != null) {
+                selectedFile[0] = f;
+                fileField.setText(f.getName());
+            }
+        });
+
+        grid.add(new Label("Fisier 3D:"), 0, 0); grid.add(fileField, 1, 0); grid.add(browseBtn, 2, 0);
+        grid.add(new Label("Pozitie X:"), 0, 1); grid.add(pxField, 1, 1);
+        grid.add(new Label("Pozitie Y:"), 0, 2); grid.add(pyField, 1, 2);
+        grid.add(new Label("Pozitie Z:"), 0, 3); grid.add(pzField, 1, 3);
+        grid.add(new Label("Rotatie X (°):"), 0, 4); grid.add(rxField, 1, 4);
+        grid.add(new Label("Rotatie Y (°):"), 0, 5); grid.add(ryField, 1, 5);
+        grid.add(new Label("Rotatie Z (°):"), 0, 6); grid.add(rzField, 1, 6);
+        grid.add(new Label("Scale:"), 0, 7); grid.add(scaleField, 1, 7);
+
+        dialog.getDialogPane().setContent(grid);
+        dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
+
+        dialog.setResultConverter(btn -> {
+            if (btn == ButtonType.OK && selectedFile[0] != null) {
+                try {
+                    float px = Float.parseFloat(pxField.getText().trim());
+                    float py = Float.parseFloat(pyField.getText().trim());
+                    float pz = Float.parseFloat(pzField.getText().trim());
+                    float rx = Float.parseFloat(rxField.getText().trim());
+                    float ry = Float.parseFloat(ryField.getText().trim());
+                    float rz = Float.parseFloat(rzField.getText().trim());
+                    float scale = Float.parseFloat(scaleField.getText().trim());
+
+                    File sectionDir = new File(sectionBox.getSourcePath());
+                    File destFile = new File(sectionDir, selectedFile[0].getName());
+
+                    if (!selectedFile[0].getAbsolutePath().equals(destFile.getAbsolutePath())) {
+                        java.nio.file.Files.copy(selectedFile[0].toPath(), destFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    }
+
+                    File txtFile = new File(sectionDir, "sectiune.txt");
+                    String newLine = String.format(Locale.ROOT, "\nobj: %s %.4f %.4f %.4f %.4f %.4f %.4f %.4f",
+                            destFile.getName(), px, py, pz, rx, ry, rz, scale);
+                    java.nio.file.Files.writeString(txtFile.toPath(), newLine, java.nio.file.StandardOpenOption.APPEND);
+
+                    currentRenderer.queueChildModelLoad(destFile.getAbsolutePath(), sectionBox.getId(), px, py, pz, rx, ry, rz, scale);
+
+                } catch (Exception ex) {
+                    ex.printStackTrace();
+                    Alert a = new Alert(Alert.AlertType.ERROR, "Date invalide:\n" + ex.getMessage());
+                    a.showAndWait();
+                }
+            }
+            return null;
+        });
+
+        dialog.showAndWait();
     }
 
     private void installAiLibraries(File aiDir, Alert infoAlert) {
@@ -570,6 +715,11 @@ public class MainController {
         vaseStage.setScene(new Scene(root, viewSize, viewSize));
         vaseStage.setOnCloseRequest(e -> renderThread.interrupt());
         vaseStage.show();
+    }
+
+    private static String planeEquationText(Vector3f normal, Vector3f point) {
+        float d = normal.dot(point);
+        return String.format("%.3fx %+.3fy %+.3fz = %.3f", normal.x, normal.y, normal.z, d);
     }
 
     private String formatClassification(SherdPythonAnalyzer.SherdAnalysisResult r) {

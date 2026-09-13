@@ -11,23 +11,23 @@ import org.joml.Vector4f;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL30;
+import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 
 import java.io.File;
-import java.nio.FloatBuffer;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.nio.ByteBuffer;
+import java.nio.FloatBuffer;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Consumer;
 
-public class OpenGLRenderer implements Runnable
-{
+public class OpenGLRenderer implements Runnable {
     private final WritableImage fxImage;
     private final int width = 800;
     private final int height = 600;
@@ -37,6 +37,7 @@ public class OpenGLRenderer implements Runnable
     private final ConcurrentLinkedQueue<String> pendingModels = new ConcurrentLinkedQueue<>();
     private final ConcurrentLinkedQueue<File> pendingSections = new ConcurrentLinkedQueue<>();
     private final ConcurrentLinkedQueue<Integer> pendingDeletions = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<ChildModelLoadRequest> pendingChildModels = new ConcurrentLinkedQueue<>();
     private int nextObjectId = 1;
 
     private volatile boolean mouseClicked = false;
@@ -47,9 +48,6 @@ public class OpenGLRenderer implements Runnable
     private final Set<Integer> selectedObjectIds = ConcurrentHashMap.newKeySet();
     private Consumer<Set<Integer>> onSelectionChanged;
 
-    // Cercuri (sus/mijloc/jos) + axa de rotatie estimata pt obiectul unic selectat -
-    // vezi updateAxisOverlay(). Geometria e in spatiul local al mesh-ului selectat, ca
-    // sa se miste automat cu el (desenata cu obj.getModelMatrix() ca model matrix).
     private int axisOverlayObjectId = -1;
     private int axisOverlayVao = -1;
     private int axisOverlayVbo = -1;
@@ -68,14 +66,38 @@ public class OpenGLRenderer implements Runnable
     public volatile boolean moveQ = false;
     public volatile boolean moveE = false;
 
+    private static class ChildModelLoadRequest {
+        String path;
+        int parentId;
+        float px, py, pz, rx, ry, rz, scale;
+    }
+
     public OpenGLRenderer(WritableImage fxImage) {
         this.fxImage = fxImage;
         updateCameraVectors();
     }
 
-    public void queueModelLoad(String filePath) { pendingModels.add(filePath); }
-    public void queueSectionLoad(File folder) { pendingSections.add(folder); }
-    public void queueDeleteObject(int objectId) { pendingDeletions.add(objectId); }
+    public void queueModelLoad(String filePath) {
+        pendingModels.add(filePath);
+    }
+
+    public void queueSectionLoad(File folder) {
+        pendingSections.add(folder);
+    }
+
+    public void queueDeleteObject(int objectId) {
+        pendingDeletions.add(objectId);
+    }
+
+    public void queueChildModelLoad(String path, int parentId, float px, float py, float pz, float rx, float ry, float rz, float scale) {
+        ChildModelLoadRequest req = new ChildModelLoadRequest();
+        req.path = path;
+        req.parentId = parentId;
+        req.px = px; req.py = py; req.pz = pz;
+        req.rx = rx; req.ry = ry; req.rz = rz;
+        req.scale = scale;
+        pendingChildModels.add(req);
+    }
 
     public void registerClick(int x, int y, boolean multiSelect) {
         this.clickX = x;
@@ -84,14 +106,27 @@ public class OpenGLRenderer implements Runnable
         this.mouseClicked = true;
     }
 
-    public Set<Integer> getSelectedObjectIds() { return selectedObjectIds; }
-    public void setOnSelectionChanged(Consumer<Set<Integer>> callback) { this.onSelectionChanged = callback; }
+    public Set<Integer> getSelectedObjectIds() {
+        return selectedObjectIds;
+    }
 
-    public boolean isSectionObject(int id) {
+    public void setOnSelectionChanged(Consumer<Set<Integer>> callback) {
+        this.onSelectionChanged = callback;
+    }
+
+    public SceneObject getObjectById(int id) {
         for (SceneObject obj : objects) {
             if (obj.getId() == id) {
-                return obj.isSectionBox || "MARKER_NW".equals(obj.getSourcePath());
+                return obj;
             }
+        }
+        return null;
+    }
+
+    public boolean isSectionObject(int id) {
+        SceneObject obj = getObjectById(id);
+        if (obj != null) {
+            return obj.isSectionBox || "MARKER_NW".equals(obj.getSourcePath());
         }
         return false;
     }
@@ -103,12 +138,6 @@ public class OpenGLRenderer implements Runnable
         }
     }
 
-    /**
-     * Recomputes the 3-circles-and-axis overlay for whichever single object is currently
-     * selected (no-op, and hides the overlay via the draw-time selection check, if 0 or
-     * 2+ objects are selected). Must run on the render thread (uses GL calls directly) -
-     * called from run()'s own loop right after a selection-changing click.
-     */
     private void updateAxisOverlay() {
         if (selectedObjectIds.size() != 1) return;
         int id = selectedObjectIds.iterator().next();
@@ -154,15 +183,10 @@ public class OpenGLRenderer implements Runnable
         axisOverlayVertexCount = lineData.length / 3;
     }
 
-    /**
-     * Builds a GL_LINES vertex list (in the mesh's own local space) for 3 parallel circles
-     * (bottom/middle/top) around the estimated vessel axis, plus one line segment through
-     * their centers. The circles span the sherd's own extent along the axis, plus a margin
-     * on both ends to visually suggest "this is where the rest of the vessel would continue".
-     */
     static float[] buildAxisOverlayGeometry(float[] positions, CurvatureClassifier.VesselAxisEstimate axis) {
         Vector3f dir = new Vector3f(axis.axisDirection);
-        if (dir.lengthSquared() < 1e-12f) dir.set(0, 1, 0); else dir.normalize();
+        if (dir.lengthSquared() < 1e-12f) dir.set(0, 1, 0);
+        else dir.normalize();
 
         float tMin = Float.MAX_VALUE, tMax = -Float.MAX_VALUE;
         Vector3f v = new Vector3f();
@@ -172,7 +196,10 @@ public class OpenGLRenderer implements Runnable
             if (t < tMin) tMin = t;
             if (t > tMax) tMax = t;
         }
-        if (tMin > tMax) { tMin = 0; tMax = 0; }
+        if (tMin > tMax) {
+            tMin = 0;
+            tMax = 0;
+        }
         float span = tMax - tMin;
         float margin = Math.max(span * 0.3f, axis.radius * 0.3f);
         float bottomT = tMin - margin, midT = (tMin + tMax) / 2f, topT = tMax + margin;
@@ -196,15 +223,23 @@ public class OpenGLRenderer implements Runnable
                 Vector3f p1 = new Vector3f(center)
                         .add(new Vector3f(u).mul((float) Math.cos(a1) * axis.radius))
                         .add(new Vector3f(w).mul((float) Math.sin(a1) * axis.radius));
-                verts.add(p0.x); verts.add(p0.y); verts.add(p0.z);
-                verts.add(p1.x); verts.add(p1.y); verts.add(p1.z);
+                verts.add(p0.x);
+                verts.add(p0.y);
+                verts.add(p0.z);
+                verts.add(p1.x);
+                verts.add(p1.y);
+                verts.add(p1.z);
             }
         }
 
         Vector3f bottomCenter = new Vector3f(axis.axisPoint).add(new Vector3f(dir).mul(bottomT));
         Vector3f topCenter = new Vector3f(axis.axisPoint).add(new Vector3f(dir).mul(topT));
-        verts.add(bottomCenter.x); verts.add(bottomCenter.y); verts.add(bottomCenter.z);
-        verts.add(topCenter.x); verts.add(topCenter.y); verts.add(topCenter.z);
+        verts.add(bottomCenter.x);
+        verts.add(bottomCenter.y);
+        verts.add(bottomCenter.z);
+        verts.add(topCenter.x);
+        verts.add(topCenter.y);
+        verts.add(topCenter.z);
 
         float[] result = new float[verts.size()];
         for (int i = 0; i < result.length; i++) result[i] = verts.get(i);
@@ -288,14 +323,14 @@ public class OpenGLRenderer implements Runnable
         List<Float> gridVerts = new ArrayList<>();
         float gridExtent = 50.0f;
         float gridStep = 1.0f;
-        for(float i = -gridExtent; i <= gridExtent; i += gridStep) {
+        for (float i = -gridExtent; i <= gridExtent; i += gridStep) {
             gridVerts.add(i); gridVerts.add(0f); gridVerts.add(-gridExtent);
             gridVerts.add(i); gridVerts.add(0f); gridVerts.add(gridExtent);
             gridVerts.add(-gridExtent); gridVerts.add(0f); gridVerts.add(i);
             gridVerts.add(gridExtent); gridVerts.add(0f); gridVerts.add(i);
         }
         float[] gridData = new float[gridVerts.size()];
-        for(int i = 0; i < gridData.length; i++) gridData[i] = gridVerts.get(i);
+        for (int i = 0; i < gridData.length; i++) gridData[i] = gridVerts.get(i);
 
         int gridVao = GL30.glGenVertexArrays();
         int gridVbo = GL30.glGenBuffers();
@@ -318,17 +353,18 @@ public class OpenGLRenderer implements Runnable
 
         GL30.glEnable(GL30.GL_DEPTH_TEST);
 
-        try
-        {
-            while (!Thread.interrupted())
-            {
+        try {
+            while (!Thread.interrupted()) {
+
                 String newModelPath = pendingModels.poll();
                 if (newModelPath != null) {
                     try {
                         Mesh mesh = ModelLoader.loadModel(newModelPath);
                         SceneObject newPiece = new SceneObject(nextObjectId++, mesh, newModelPath);
                         objects.add(newPiece);
-                    } catch (Exception e) { e.printStackTrace(); }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
                 }
 
                 File sectionFolder;
@@ -350,7 +386,7 @@ public class OpenGLRenderer implements Runnable
                                 float d = Float.parseFloat(parts[3]);
 
                                 Mesh boxMesh = PrimitiveFactory.createLinesBox(w, h, d, Texture.createDefaultWhite());
-                                sectionBox = new SceneObject(nextObjectId++, boxMesh, "SECTIUNE");
+                                sectionBox = new SceneObject(nextObjectId++, boxMesh, sectionFolder.getAbsolutePath());
                                 sectionBox.isSectionBox = true;
                                 sectionBox.scale = 0.35f;
                                 objects.add(sectionBox);
@@ -359,11 +395,9 @@ public class OpenGLRenderer implements Runnable
                                 Mesh markerMesh = PrimitiveFactory.createBox(0.2f, 0.2f, 0.2f, blueTexId);
                                 SceneObject nwMarker = new SceneObject(nextObjectId++, markerMesh, "MARKER_NW");
                                 nwMarker.parent = sectionBox;
-
                                 nwMarker.position.set(-w / 2, h / 2, -d / 2);
                                 objects.add(nwMarker);
-                            }
-                            else if (parts[0].equals("obj:") && parts.length >= 8 && sectionBox != null) {
+                            } else if (parts[0].equals("obj:") && parts.length >= 8 && sectionBox != null) {
                                 String filename = parts[1];
                                 float px = Float.parseFloat(parts[2]);
                                 float py = Float.parseFloat(parts[3]);
@@ -371,7 +405,6 @@ public class OpenGLRenderer implements Runnable
                                 float rx = Float.parseFloat(parts[5]);
                                 float ry = Float.parseFloat(parts[6]);
                                 float rz = Float.parseFloat(parts[7]);
-
                                 float objScale = (parts.length >= 9) ? Float.parseFloat(parts[8]) : 0.15f;
 
                                 File objFile = new File(sectionFolder, filename);
@@ -379,15 +412,34 @@ public class OpenGLRenderer implements Runnable
 
                                 Mesh mesh = ModelLoader.loadModel(objFile.getAbsolutePath());
                                 SceneObject child = new SceneObject(nextObjectId++, mesh, objFile.getAbsolutePath());
-
                                 child.parent = sectionBox;
                                 child.position.set(px, py, pz);
-                                child.rotation.set((float)Math.toRadians(rx), (float)Math.toRadians(ry), (float)Math.toRadians(rz));
+                                child.rotation.set((float) Math.toRadians(rx), (float) Math.toRadians(ry), (float) Math.toRadians(rz));
                                 child.scale = objScale;
                                 objects.add(child);
                             }
                         }
-                    } catch (Exception e) { e.printStackTrace(); }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+
+                ChildModelLoadRequest childReq;
+                while ((childReq = pendingChildModels.poll()) != null) {
+                    try {
+                        Mesh mesh = ModelLoader.loadModel(childReq.path);
+                        SceneObject child = new SceneObject(nextObjectId++, mesh, childReq.path);
+                        SceneObject parent = getObjectById(childReq.parentId);
+                        if (parent != null) {
+                            child.parent = parent;
+                            child.position.set(childReq.px, childReq.py, childReq.pz);
+                            child.rotation.set((float) Math.toRadians(childReq.rx), (float) Math.toRadians(childReq.ry), (float) Math.toRadians(childReq.rz));
+                            child.scale = childReq.scale;
+                            objects.add(child);
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
                 }
 
                 processPendingDeletions();
@@ -516,11 +568,13 @@ public class OpenGLRenderer implements Runnable
                     pixelWriter.setPixels(0, 0, width, height, PixelFormat.getByteBgraPreInstance(), safePixelData, 0, width * 4);
                 });
 
-                try { Thread.sleep(16); } catch (InterruptedException e) { break; }
+                try {
+                    Thread.sleep(16);
+                } catch (InterruptedException e) {
+                    break;
+                }
             }
-        }
-        finally
-        {
+        } finally {
             MemoryUtil.memFree(pixelBuffer);
             MemoryUtil.memFree(pickingPixelBuffer);
             GLFW.glfwDestroyWindow(window);
@@ -531,6 +585,12 @@ public class OpenGLRenderer implements Runnable
         Integer deleteId;
         while ((deleteId = pendingDeletions.poll()) != null) {
             final int idToRemove = deleteId;
+
+            SceneObject toRemove = getObjectById(idToRemove);
+            if (toRemove != null && toRemove.isSectionBox) {
+                objects.removeIf(obj -> obj.parent == toRemove);
+            }
+
             objects.removeIf(obj -> obj.getId() == idToRemove);
             SessionDatabase.removeSection(idToRemove);
             if (selectedObjectIds.contains(idToRemove)) {
