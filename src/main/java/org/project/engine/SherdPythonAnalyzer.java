@@ -11,6 +11,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Runs the existing sherdtool.py analysis (axis fit, cross-section, measurements)
@@ -42,8 +44,15 @@ public class SherdPythonAnalyzer {
             String formClass,
             double formAspectRatio,
             double rimEversionDeg,
-            String notes
-    ) {}
+            String notes,
+            float[] profileHeights,
+            float[] profileRadii
+    ) {
+        /** True when sherdtool.py's axis fit produced a usable r(h) profile (not always the case - see profileHeights). */
+        public boolean hasProfile() {
+            return profileHeights.length >= 2 && profileHeights.length == profileRadii.length;
+        }
+    }
 
     public static SherdAnalysisResult analyze(Path meshPath) throws IOException, InterruptedException {
         if (!Files.exists(SCRIPT_PATH)) {
@@ -101,7 +110,27 @@ public class SherdPythonAnalyzer {
         if (rows.isEmpty()) {
             throw new IOException("summary.csv este gol.");
         }
-        return toResult(rows.get(0));
+        Map<String, String> row = rows.get(0);
+
+        // The r(h) profile isn't in summary.csv - it lives in <name>_fit.json, written
+        // separately by sherdtool.py's axis-fit step. Missing/unparseable -> empty arrays
+        // (hasProfile() reports false), not an error: a failed profile fit is a normal,
+        // fairly common outcome on real sherds, not a bug in the bridge.
+        float[] profileHeights = new float[0];
+        float[] profileRadii = new float[0];
+        String name = row.getOrDefault("name", "");
+        Path jsonPath = outputDir.resolve(name + "_fit.json");
+        if (!name.isBlank() && Files.exists(jsonPath)) {
+            try {
+                String json = new String(Files.readAllBytes(jsonPath), StandardCharsets.UTF_8);
+                profileHeights = parseJsonFloatArray(json, "profile_h");
+                profileRadii = parseJsonFloatArray(json, "profile_r");
+            } catch (Exception ignored) {
+                // profile stays unavailable; the rest of the analysis is still valid
+            }
+        }
+
+        return toResult(row, profileHeights, profileRadii);
     }
 
     private static String tail(String text, int maxLines) {
@@ -114,7 +143,7 @@ public class SherdPythonAnalyzer {
         return sb.toString();
     }
 
-    private static SherdAnalysisResult toResult(Map<String, String> row) {
+    private static SherdAnalysisResult toResult(Map<String, String> row, float[] profileHeights, float[] profileRadii) {
         return new SherdAnalysisResult(
                 row.getOrDefault("name", ""),
                 row.getOrDefault("unit", ""),
@@ -134,8 +163,29 @@ public class SherdPythonAnalyzer {
                 row.getOrDefault("form_class", "unknown"),
                 parseDouble(row.get("form_aspect_ratio")),
                 parseDouble(row.get("rim_eversion_deg")),
-                row.getOrDefault("notes", "")
+                row.getOrDefault("notes", ""),
+                profileHeights,
+                profileRadii
         );
+    }
+
+    /** Extracts a JSON array of numbers for "key": [...] via regex - the fit JSON's schema is
+     * fixed and produced only by our own sherdtool.py, so a full JSON library is unwarranted. */
+    static float[] parseJsonFloatArray(String json, String key) {
+        Matcher m = Pattern.compile("\"" + key + "\"\\s*:\\s*\\[([^\\]]*)]").matcher(json);
+        if (!m.find()) return new float[0];
+        String inner = m.group(1).trim();
+        if (inner.isEmpty()) return new float[0];
+        String[] parts = inner.split(",");
+        float[] result = new float[parts.length];
+        for (int i = 0; i < parts.length; i++) {
+            try {
+                result[i] = Float.parseFloat(parts[i].trim());
+            } catch (NumberFormatException e) {
+                result[i] = 0f;
+            }
+        }
+        return result;
     }
 
     private static int parseInt(String s) {
@@ -195,7 +245,7 @@ public class SherdPythonAnalyzer {
                 cur.append(c);
             }
         }
-        if (cur.length() > 0 || !field.isEmpty()) {
+        if (!cur.isEmpty() || !field.isEmpty()) {
             field.add(cur.toString());
             records.add(new ArrayList<>(field));
         }

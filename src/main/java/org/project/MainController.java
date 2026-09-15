@@ -7,6 +7,9 @@ import javafx.fxml.FXML;
 import javafx.geometry.Pos;
 import javafx.geometry.Rectangle2D;
 import javafx.scene.Scene;
+import javafx.scene.chart.LineChart;
+import javafx.scene.chart.NumberAxis;
+import javafx.scene.chart.XYChart;
 import javafx.scene.control.*;
 import javafx.scene.image.ImageView;
 import javafx.scene.image.WritableImage;
@@ -915,10 +918,33 @@ public class MainController {
         classifyResultArea.setPrefRowCount(9);
         classifyResultArea.setStyle("-fx-control-inner-background: #2b2b2b; -fx-text-fill: #dddddd; -fx-font-family: monospace;");
 
+        NumberAxis profileXAxis = new NumberAxis();
+        profileXAxis.setLabel("Raza (r)");
+        NumberAxis profileYAxis = new NumberAxis();
+        profileYAxis.setLabel("Inaltime (h)");
+        LineChart<Number, Number> profileChart = new LineChart<>(profileXAxis, profileYAxis);
+        profileChart.setTitle("Profil ciob (sectiune r-h a peretelui)");
+        profileChart.setCreateSymbols(false);
+        profileChart.setLegendVisible(false);
+        profileChart.setPrefHeight(220);
+        profileChart.setAnimated(false);
+        profileChart.setVisible(false);
+        profileChart.setManaged(false);
+
+        Label profileStatusLabel = new Label();
+        profileStatusLabel.setStyle("-fx-text-fill: #aaaaaa; -fx-font-style: italic;");
+        profileStatusLabel.setWrapText(true);
+        profileStatusLabel.setVisible(false);
+        profileStatusLabel.setManaged(false);
+
         classifyButton.setOnAction(e -> {
             classifyButton.setText("Se analizeaza...");
             classifyButton.setDisable(true);
             classifyResultArea.setText("Se ruleaza sherdtool.py, poate dura cateva zeci de secunde...");
+            profileChart.setVisible(false);
+            profileChart.setManaged(false);
+            profileStatusLabel.setVisible(false);
+            profileStatusLabel.setManaged(false);
 
             Task<SherdPythonAnalyzer.SherdAnalysisResult> classifyTask = new Task<>() {
                 @Override
@@ -929,7 +955,27 @@ public class MainController {
             classifyTask.setOnSucceeded(ev -> {
                 classifyButton.setText("Clasifica ciob (Python)");
                 classifyButton.setDisable(false);
-                classifyResultArea.setText(formatClassification(classifyTask.getValue()));
+                SherdPythonAnalyzer.SherdAnalysisResult result = classifyTask.getValue();
+                classifyResultArea.setText(formatClassification(result));
+
+                if (result.hasProfile()) {
+                    profileChart.getData().clear();
+                    XYChart.Series<Number, Number> outerSide = new XYChart.Series<>();
+                    XYChart.Series<Number, Number> innerSide = new XYChart.Series<>();
+                    float[] h = result.profileHeights();
+                    float[] r = result.profileRadii();
+                    for (int i = 0; i < h.length; i++) {
+                        outerSide.getData().add(new XYChart.Data<>(r[i], h[i]));
+                        innerSide.getData().add(new XYChart.Data<>(-r[i], h[i]));
+                    }
+                    profileChart.getData().addAll(outerSide, innerSide);
+                    profileChart.setVisible(true);
+                    profileChart.setManaged(true);
+                } else {
+                    profileStatusLabel.setText("Profil indisponibil: fitul de axa al sherdtool.py nu a produs o sectiune r(h) pentru acest ciob (destul de frecvent pe cioburi reale).");
+                    profileStatusLabel.setVisible(true);
+                    profileStatusLabel.setManaged(true);
+                }
             });
             classifyTask.setOnFailed(ev -> {
                 classifyButton.setText("Clasifica ciob (Python)");
@@ -943,7 +989,7 @@ public class MainController {
             classifyThread.start();
         });
 
-        VBox classifyControls = new VBox(8, classifyButton, classifyResultArea);
+        VBox classifyControls = new VBox(8, classifyButton, classifyResultArea, profileChart, profileStatusLabel);
         classifyControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
         VBox controls = new VBox(15, infoBox, curvatureControls, crossSectionControls, aiControls, classifyControls);

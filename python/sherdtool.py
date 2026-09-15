@@ -4777,9 +4777,29 @@ def process_single_mesh(mesh, name, mesh_path, output_dir, unit="auto", axis_hin
         result.preserved_height = float(prof_h.max() - prof_h.min())
     else:
         result.preserved_height = float(mesh.extents[1]) # fallback
-        
+
     result.form_class = "unknown"
     result.quality = "good"
+
+    # Save the profile (axis fit) JSON as soon as it's available, not only after a
+    # successful cross-section extraction below - prof_h/prof_r are already valid here,
+    # and section extraction can fail independently (e.g. "section extraction failed")
+    # even when the axis/profile fit itself succeeded. The fuller write further down
+    # (with section_azimuth_deg added) overwrites this one when it's reached.
+    json_path = output_dir / f"{name}_fit.json"
+    try:
+        json.dump({
+            "axis_dir": list(result.axis_dir),
+            "axis_point": list(result.axis_point),
+            "profile_h": prof_h.tolist() if prof_h is not None else [],
+            "profile_r": prof_r.tolist() if prof_r is not None else [],
+            "rim_diameter": 0.0,
+            "max_diameter": 0.0,
+            "unit": result.unit,
+            "section_azimuth_deg": None,
+        }, open(json_path, "w"), indent=2)
+    except Exception:
+        pass
 
     # Cross-section
     if verbose: print("   extracting cross-section...")
