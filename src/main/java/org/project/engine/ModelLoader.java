@@ -23,9 +23,6 @@ import java.util.Map;
 
 public class ModelLoader
 {
-    // Geometria pura (pozitii/normale/UV/indici), fara nimic legat de OpenGL -
-    // poate fi calculata si testata fara context GL viu (spre deosebire de
-    // Mesh, care are nevoie de un context pentru glGenVertexArrays etc.).
     public static class Geometry
     {
         public final float[] positions;
@@ -72,16 +69,19 @@ public class ModelLoader
         }
     }
 
-    // Punct de intrare public, fara GL - util in teste (ex. verificarea centrului
-    // de masa pe fisiere reale) unde nu exista un context OpenGL viu.
     public static Geometry loadGeometry(String filePath)
     {
-        return importGeometry(filePath).geometry;
+        return importGeometry(filePath, true).geometry;
     }
 
     public static Mesh loadModel(String filePath)
     {
-        ImportResult imported = importGeometry(filePath);
+        return loadModel(filePath, true);
+    }
+
+    public static Mesh loadModel(String filePath, boolean normalize)
+    {
+        ImportResult imported = importGeometry(filePath, normalize);
 
         Map<Integer, Integer> textureCache = new HashMap<>();
         List<MeshPart> parts = new ArrayList<>();
@@ -96,7 +96,7 @@ public class ModelLoader
         return new Mesh(geometry.positions, geometry.normals, geometry.texCoords, geometry.indices, parts);
     }
 
-    private static ImportResult importGeometry(String filePath)
+    private static ImportResult importGeometry(String filePath, boolean normalize)
     {
         AIScene scene = Assimp.aiImportFile(filePath,
                 Assimp.aiProcess_Triangulate
@@ -193,21 +193,23 @@ public class ModelLoader
             indexCursor += faceCount * 3;
         }
 
-        float centerX = (minX + maxX) / 2.0f;
-        float centerY = (minY + maxY) / 2.0f;
-        float centerZ = (minZ + maxZ) / 2.0f;
+        if (normalize) {
+            float centerX = (minX + maxX) / 2.0f;
+            float centerY = (minY + maxY) / 2.0f;
+            float centerZ = (minZ + maxZ) / 2.0f;
 
-        float extentX = maxX - minX;
-        float extentY = maxY - minY;
-        float extentZ = maxZ - minZ;
+            float extentX = maxX - minX;
+            float extentY = maxY - minY;
+            float extentZ = maxZ - minZ;
 
-        float maxExtent = Math.max(extentX, Math.max(extentY, extentZ));
-        float scale = 3.0f / (maxExtent == 0 ? 1 : maxExtent);
+            float maxExtent = Math.max(extentX, Math.max(extentY, extentZ));
+            float scale = 3.0f / (maxExtent == 0 ? 1 : maxExtent);
 
-        for (int i = 0; i < totalVertices; i++) {
-            vertices[i * 3]     = (vertices[i * 3] - centerX) * scale;
-            vertices[i * 3 + 1] = (vertices[i * 3 + 1] - centerY) * scale;
-            vertices[i * 3 + 2] = (vertices[i * 3 + 2] - centerZ) * scale;
+            for (int i = 0; i < totalVertices; i++) {
+                vertices[i * 3]     = (vertices[i * 3] - centerX) * scale;
+                vertices[i * 3 + 1] = (vertices[i * 3 + 1] - centerY) * scale;
+                vertices[i * 3 + 2] = (vertices[i * 3 + 2] - centerZ) * scale;
+            }
         }
 
         Geometry geometry = new Geometry(vertices, normals, texCoords, indices);

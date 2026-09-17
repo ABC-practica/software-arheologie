@@ -691,7 +691,7 @@ public class MainController {
         imageView.setFitHeight(viewSize);
         imageView.setPreserveRatio(true);
 
-        SingleObjectRenderer vaseRenderer = new SingleObjectRenderer(modelPath, frameBufferImage, viewSize, viewSize, true);
+        SingleObjectRenderer vaseRenderer = new SingleObjectRenderer(modelPath, null, frameBufferImage, viewSize, viewSize, true);
 
         double[] lastX = {0};
         double[] lastY = {0};
@@ -718,6 +718,79 @@ public class MainController {
         vaseStage.setScene(new Scene(root, viewSize, viewSize));
         vaseStage.setOnCloseRequest(e -> renderThread.interrupt());
         vaseStage.show();
+    }
+
+    private void openGhostPreviewWindow(SceneObject target, CurvatureClassifier.VesselAxisEstimate axisEstimate) {
+        try {
+            File tempObjFile = File.createTempFile("ghost_preview_", ".obj");
+            GhostVesselGenerator.generateGhostOnly(target, axisEstimate, tempObjFile);
+
+            int viewSize = 600;
+            WritableImage frameBufferImage = new WritableImage(viewSize, viewSize);
+            ImageView imageView = new ImageView(frameBufferImage);
+            imageView.setFitWidth(viewSize);
+            imageView.setFitHeight(viewSize);
+            imageView.setPreserveRatio(true);
+
+            SingleObjectRenderer previewRenderer = new SingleObjectRenderer(target.getSourcePath(), tempObjFile.getAbsolutePath(), frameBufferImage, viewSize, viewSize, true);
+
+            double[] lastX = {0};
+            double[] lastY = {0};
+            imageView.setOnMousePressed(event -> {
+                lastX[0] = event.getX();
+                lastY[0] = event.getY();
+            });
+            imageView.setOnMouseDragged(event -> {
+                previewRenderer.rotate((float) (event.getX() - lastX[0]), (float) (event.getY() - lastY[0]));
+                lastX[0] = event.getX();
+                lastY[0] = event.getY();
+            });
+            imageView.setOnScroll(event -> previewRenderer.scale((float) event.getDeltaY() * 0.005f));
+
+            Button saveBtn = new Button("Salveaza Modelul pe Disc (.obj)");
+            saveBtn.setStyle("-fx-background-color: #28a745; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+            saveBtn.setMaxWidth(Double.MAX_VALUE);
+
+            Stage previewStage = new Stage();
+
+            saveBtn.setOnAction(e -> {
+                FileChooser fc = new FileChooser();
+                fc.setTitle("Salveaza Vas Fantoma");
+                fc.getExtensionFilters().add(new FileChooser.ExtensionFilter("Obiect 3D", "*.obj"));
+                fc.setInitialFileName("vas_fantoma.obj");
+                File dest = fc.showSaveDialog(previewStage);
+                if (dest != null) {
+                    try {
+                        GhostVesselGenerator.generateAndExport(target, axisEstimate, dest);
+                        Alert a = new Alert(Alert.AlertType.INFORMATION, "Modelul a fost exportat cu succes!");
+                        a.showAndWait();
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                        new Alert(Alert.AlertType.ERROR, "Eroare la salvare: " + ex.getMessage()).showAndWait();
+                    }
+                }
+            });
+
+            VBox root = new VBox(10, imageView, saveBtn);
+            root.setStyle("-fx-background-color: #2b2b2b; -fx-padding: 10;");
+            root.setAlignment(Pos.CENTER);
+
+            Thread renderThread = new Thread(previewRenderer);
+            renderThread.setDaemon(true);
+            renderThread.start();
+
+            previewStage.setTitle("Previzualizare Vas Fantoma");
+            previewStage.setScene(new Scene(root, viewSize, viewSize + 60));
+            previewStage.setOnCloseRequest(e -> {
+                renderThread.interrupt();
+                tempObjFile.delete();
+            });
+            previewStage.show();
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            new Alert(Alert.AlertType.ERROR, "Eroare la generare: " + e.getMessage()).showAndWait();
+        }
     }
 
     private static String planeEquationText(Vector3f normal, Vector3f point) {
@@ -766,6 +839,7 @@ public class MainController {
             }
         }
         if (target == null) return;
+        final SceneObject finalTarget = target;
         final String meshSourcePath = target.getSourcePath();
 
         int viewSize = 500;
@@ -775,7 +849,7 @@ public class MainController {
         imageView.setFitHeight(viewSize);
         imageView.setPreserveRatio(true);
 
-        SingleObjectRenderer objectRenderer = new SingleObjectRenderer(target.getSourcePath(), frameBufferImage, viewSize, viewSize, false);
+        SingleObjectRenderer objectRenderer = new SingleObjectRenderer(target.getSourcePath(), null, frameBufferImage, viewSize, viewSize, false);
 
         objectRenderer.setOnTopViewCaptured(image -> openTopViewPreview(objectId, image));
 
@@ -811,6 +885,11 @@ public class MainController {
         computeButton.setStyle("-fx-background-color: #0078D7; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
         computeButton.setMaxWidth(Double.MAX_VALUE);
 
+        Button previewGhostBtn = new Button("Previzualizare Vas Fantoma");
+        previewGhostBtn.setStyle("-fx-background-color: #17a2b8; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        previewGhostBtn.setMaxWidth(Double.MAX_VALUE);
+        previewGhostBtn.setDisable(true);
+
         CheckBox extCheck = new CheckBox("Curbura exterioara");
         extCheck.setDisable(true);
         extCheck.setStyle("-fx-text-fill: white;");
@@ -844,16 +923,25 @@ public class MainController {
             objectRenderer.requestComputeCurvature();
         });
 
+        final CurvatureClassifier.Result[] lastCurvatureResult = new CurvatureClassifier.Result[1];
+
         objectRenderer.setOnCurvatureComputed(result -> {
+            lastCurvatureResult[0] = result;
             computeButton.setText("Curbura calculata");
             extCheck.setDisable(false);
             intCheck.setDisable(false);
+            previewGhostBtn.setDisable(false);
 
             float distance = result.exteriorPlanePoint.distance(result.interiorPlanePoint);
             widthLabel.setText(String.format("Latime estimata: %.3f unitati", distance));
 
             extEquationLabel.setText("Exterior: " + result.exteriorQuadric.toEquationText());
             intEquationLabel.setText("Interior: " + result.interiorQuadric.toEquationText());
+        });
+
+        previewGhostBtn.setOnAction(e -> {
+            if (lastCurvatureResult[0] == null) return;
+            openGhostPreviewWindow(finalTarget, lastCurvatureResult[0].exteriorAxisEstimate);
         });
 
         Slider yawSlider = new Slider(0, 360, 0);
@@ -879,7 +967,7 @@ public class MainController {
         Label l2 = new Label("Sectiune verticala"); l2.setStyle("-fx-text-fill: white;");
         Label l3 = new Label("Pozitie plan"); l3.setStyle("-fx-text-fill: white;");
 
-        VBox curvatureControls = new VBox(8, computeButton, extCheck, intCheck, widthLabel,
+        VBox curvatureControls = new VBox(8, computeButton, previewGhostBtn, extCheck, intCheck, widthLabel,
                 extEquationLabel, intEquationLabel, spreadLabel, spreadSlider);
         curvatureControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 

@@ -11,7 +11,6 @@ import org.joml.Vector4f;
 import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL30;
-import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 
 import java.io.File;
@@ -116,9 +115,7 @@ public class OpenGLRenderer implements Runnable {
 
     public SceneObject getObjectById(int id) {
         for (SceneObject obj : objects) {
-            if (obj.getId() == id) {
-                return obj;
-            }
+            if (obj.getId() == id) return obj;
         }
         return null;
     }
@@ -185,24 +182,36 @@ public class OpenGLRenderer implements Runnable {
 
     static float[] buildAxisOverlayGeometry(float[] positions, CurvatureClassifier.VesselAxisEstimate axis) {
         Vector3f dir = new Vector3f(axis.axisDirection);
-        if (dir.lengthSquared() < 1e-12f) dir.set(0, 1, 0);
-        else dir.normalize();
+        if (dir.lengthSquared() < 1e-12f) dir.set(0, 1, 0); else dir.normalize();
 
         float tMin = Float.MAX_VALUE, tMax = -Float.MAX_VALUE;
-        Vector3f v = new Vector3f();
-        for (int i = 0; i + 2 < positions.length; i += 3) {
-            v.set(positions[i], positions[i + 1], positions[i + 2]).sub(axis.axisPoint);
-            float t = v.dot(dir);
+        for (int i = 0; i < positions.length; i += 3) {
+            float t = new Vector3f(positions[i], positions[i + 1], positions[i + 2]).sub(axis.axisPoint).dot(dir);
             if (t < tMin) tMin = t;
             if (t > tMax) tMax = t;
         }
-        if (tMin > tMax) {
-            tMin = 0;
-            tMax = 0;
+        if (tMin > tMax) { tMin = 0; tMax = 0; }
+
+        int RINGS = 5;
+        float[] heights = new float[RINGS];
+        float[] radii = new float[RINGS];
+        float tol = (tMax - tMin) / (RINGS * 2.0f);
+
+        for (int i = 0; i < RINGS; i++) {
+            heights[i] = tMin + (tMax - tMin) * (i / (float)(RINGS - 1));
+            float maxR = 0; int count = 0;
+            for (int j = 0; j < positions.length; j += 3) {
+                Vector3f p = new Vector3f(positions[j], positions[j+1], positions[j+2]);
+                Vector3f rel = p.sub(axis.axisPoint);
+                float h = rel.dot(dir);
+                if (Math.abs(h - heights[i]) <= tol) {
+                    float r = rel.sub(new Vector3f(dir).mul(h)).length();
+                    if (r > maxR) maxR = r;
+                    count++;
+                }
+            }
+            radii[i] = count > 0 ? maxR : axis.radius;
         }
-        float span = tMax - tMin;
-        float margin = Math.max(span * 0.3f, axis.radius * 0.3f);
-        float bottomT = tMin - margin, midT = (tMin + tMax) / 2f, topT = tMax + margin;
 
         Vector3f helper = Math.abs(dir.x) < 0.9f ? new Vector3f(1, 0, 0) : new Vector3f(0, 1, 0);
         Vector3f u = new Vector3f(helper).sub(new Vector3f(dir).mul(helper.dot(dir)));
@@ -212,34 +221,24 @@ public class OpenGLRenderer implements Runnable {
 
         int segments = 48;
         List<Float> verts = new ArrayList<>();
-        for (float t : new float[]{bottomT, midT, topT}) {
-            Vector3f center = new Vector3f(axis.axisPoint).add(new Vector3f(dir).mul(t));
+
+        for (int j = 0; j < RINGS; j++) {
+            Vector3f center = new Vector3f(axis.axisPoint).add(new Vector3f(dir).mul(heights[j]));
+            float r = radii[j];
             for (int i = 0; i < segments; i++) {
                 double a0 = 2 * Math.PI * i / segments;
                 double a1 = 2 * Math.PI * (i + 1) / segments;
-                Vector3f p0 = new Vector3f(center)
-                        .add(new Vector3f(u).mul((float) Math.cos(a0) * axis.radius))
-                        .add(new Vector3f(w).mul((float) Math.sin(a0) * axis.radius));
-                Vector3f p1 = new Vector3f(center)
-                        .add(new Vector3f(u).mul((float) Math.cos(a1) * axis.radius))
-                        .add(new Vector3f(w).mul((float) Math.sin(a1) * axis.radius));
-                verts.add(p0.x);
-                verts.add(p0.y);
-                verts.add(p0.z);
-                verts.add(p1.x);
-                verts.add(p1.y);
-                verts.add(p1.z);
+                Vector3f p0 = new Vector3f(center).add(new Vector3f(u).mul((float) Math.cos(a0) * r)).add(new Vector3f(w).mul((float) Math.sin(a0) * r));
+                Vector3f p1 = new Vector3f(center).add(new Vector3f(u).mul((float) Math.cos(a1) * r)).add(new Vector3f(w).mul((float) Math.sin(a1) * r));
+                verts.add(p0.x); verts.add(p0.y); verts.add(p0.z);
+                verts.add(p1.x); verts.add(p1.y); verts.add(p1.z);
             }
         }
 
-        Vector3f bottomCenter = new Vector3f(axis.axisPoint).add(new Vector3f(dir).mul(bottomT));
-        Vector3f topCenter = new Vector3f(axis.axisPoint).add(new Vector3f(dir).mul(topT));
-        verts.add(bottomCenter.x);
-        verts.add(bottomCenter.y);
-        verts.add(bottomCenter.z);
-        verts.add(topCenter.x);
-        verts.add(topCenter.y);
-        verts.add(topCenter.z);
+        Vector3f bottomCenter = new Vector3f(axis.axisPoint).add(new Vector3f(dir).mul(tMin));
+        Vector3f topCenter = new Vector3f(axis.axisPoint).add(new Vector3f(dir).mul(tMax));
+        verts.add(bottomCenter.x); verts.add(bottomCenter.y); verts.add(bottomCenter.z);
+        verts.add(topCenter.x); verts.add(topCenter.y); verts.add(topCenter.z);
 
         float[] result = new float[verts.size()];
         for (int i = 0; i < result.length; i++) result[i] = verts.get(i);

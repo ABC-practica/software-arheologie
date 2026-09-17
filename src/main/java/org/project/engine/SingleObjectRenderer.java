@@ -21,9 +21,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-public class SingleObjectRenderer implements Runnable
-{
+public class SingleObjectRenderer implements Runnable {
     private final String modelPath;
+    private final String ghostPath;
     private final WritableImage fxImage;
     private final int width;
     private final int height;
@@ -47,8 +47,9 @@ public class SingleObjectRenderer implements Runnable
     private Consumer<CurvatureClassifier.Result> onCurvatureComputed;
     private Consumer<WritableImage> onTopViewCaptured;
 
-    public SingleObjectRenderer(String modelPath, WritableImage fxImage, int width, int height, boolean isAiResult) {
+    public SingleObjectRenderer(String modelPath, String ghostPath, WritableImage fxImage, int width, int height, boolean isAiResult) {
         this.modelPath = modelPath;
+        this.ghostPath = ghostPath;
         this.fxImage = fxImage;
         this.width = width;
         this.height = height;
@@ -82,14 +83,12 @@ public class SingleObjectRenderer implements Runnable
         this.crossSectionOffset = offset;
         this.crossSectionComputeRequested = true;
     }
-    public void setCrossSectionThickness(float thickness) {}
     public void requestComputeCrossSection() { this.crossSectionComputeRequested = true; }
     public void requestTopViewCapture() { this.topViewCaptureRequested = true; }
     public void setOnTopViewCaptured(Consumer<WritableImage> callback) { this.onTopViewCaptured = callback; }
 
     @Override
-    public void run()
-    {
+    public void run() {
         if (!GLFW.glfwInit()) throw new IllegalStateException("Nu s-a putut initializa GLFW");
 
         GLFW.glfwWindowHint(GLFW.GLFW_VISIBLE, GLFW.GLFW_FALSE);
@@ -111,10 +110,18 @@ public class SingleObjectRenderer implements Runnable
         GL30.glFramebufferRenderbuffer(GL30.GL_FRAMEBUFFER, GL30.GL_DEPTH_STENCIL_ATTACHMENT, GL30.GL_RENDERBUFFER, rbo);
 
         SceneObject object;
-        ShaderProgram shader, overlayShader;
+        SceneObject ghostObject = null;
+        ShaderProgram shader, overlayShader, ghostShader;
+
         try {
             Mesh mesh = ModelLoader.loadModel(modelPath);
             object = new SceneObject(0, mesh, modelPath);
+
+            if (ghostPath != null) {
+                // Aici am adaugat 'false' pentru a NU mai strica originile obiectului fantoma
+                Mesh ghostMesh = ModelLoader.loadModel(ghostPath, false);
+                ghostObject = new SceneObject(1, ghostMesh, ghostPath);
+            }
 
             String fragCode = isAiResult ?
                     "#version 330 core\n" +
@@ -135,9 +142,22 @@ public class SingleObjectRenderer implements Runnable
             shader.createVertexShader(Files.readString(Paths.get("src/main/resources/shaders/vertex.glsl")));
             shader.createFragmentShader(fragCode);
             shader.link();
-            shader.bind();
-            shader.setUniform("texture1", 0);
-            shader.unbind();
+
+            String ghostFragCode = "#version 330 core\n" +
+                    "in vec3 Normal;\n" +
+                    "layout(location = 0) out vec4 FragColor;\n" +
+                    "void main() {\n" +
+                    "    vec3 lightDir = normalize(vec3(0.5, 1.0, 0.5));\n" +
+                    "    vec3 norm = normalize(Normal);\n" +
+                    "    if (!gl_FrontFacing) norm = -norm;\n" +
+                    "    float diff = max(dot(norm, lightDir), 0.25);\n" +
+                    "    FragColor = vec4(vec3(0.4, 0.7, 0.9) * diff, 0.35);\n" +
+                    "}\n";
+
+            ghostShader = new ShaderProgram();
+            ghostShader.createVertexShader(Files.readString(Paths.get("src/main/resources/shaders/vertex.glsl")));
+            ghostShader.createFragmentShader(ghostFragCode);
+            ghostShader.link();
 
             overlayShader = new ShaderProgram();
             overlayShader.createVertexShader(Files.readString(Paths.get("src/main/resources/shaders/overlay_vertex.glsl")));
@@ -197,19 +217,24 @@ public class SingleObjectRenderer implements Runnable
             GL30.glDisable(GL30.GL_CULL_FACE);
         }
 
-        try
-        {
-            while (!Thread.interrupted())
-            {
+        try {
+            while (!Thread.interrupted()) {
                 if (pendingRotateX != 0 || pendingRotateY != 0) {
                     object.rotation.y -= pendingRotateX * 0.01f;
                     object.rotation.x -= pendingRotateY * 0.01f;
+                    if (ghostObject != null) {
+                        ghostObject.rotation.y = object.rotation.y;
+                        ghostObject.rotation.x = object.rotation.x;
+                    }
                     pendingRotateX = 0;
                     pendingRotateY = 0;
                 }
                 if (pendingScale != 0) {
                     object.scale += pendingScale;
                     if (object.scale < 0.05f) object.scale = 0.05f;
+                    if (ghostObject != null) {
+                        ghostObject.scale = object.scale;
+                    }
                     pendingScale = 0;
                 }
 
@@ -258,12 +283,34 @@ public class SingleObjectRenderer implements Runnable
                     }
                 }
 
+                // 1. Randam obiectul solid (ciobul) PRIMUL
                 shader.bind();
                 shader.setUniform("projection", projection);
                 shader.setUniform("view", view);
                 shader.setUniform("model", modelMat);
                 object.getMesh().render();
+                shader.unbind();
 
+                // 2. Randam obiectul transparent (Fantoma) PESTE ciob
+                if (ghostObject != null) {
+                    GL30.glEnable(GL30.GL_BLEND);
+                    GL30.glBlendFunc(GL30.GL_SRC_ALPHA, GL30.GL_ONE_MINUS_SRC_ALPHA);
+                    GL30.glDepthMask(false);
+                    GL30.glDisable(GL30.GL_CULL_FACE);
+
+                    ghostShader.bind();
+                    ghostShader.setUniform("projection", projection);
+                    ghostShader.setUniform("view", view);
+                    ghostShader.setUniform("model", ghostObject.getModelMatrix());
+                    ghostObject.getMesh().render();
+                    ghostShader.unbind();
+
+                    GL30.glDepthMask(true);
+                    GL30.glDisable(GL30.GL_BLEND);
+                    GL30.glEnable(GL30.GL_CULL_FACE);
+                }
+
+                // 3. Randam planurile matematice
                 if (!isAiResult) {
                     GL30.glEnable(GL30.GL_BLEND);
                     GL30.glBlendFunc(GL30.GL_SRC_ALPHA, GL30.GL_ONE_MINUS_SRC_ALPHA);
@@ -272,9 +319,6 @@ public class SingleObjectRenderer implements Runnable
                     overlayShader.setUniform("projection", projection);
                     overlayShader.setUniform("view", view);
 
-                    // Spread exterior/interior overlays apart left/right on screen (world-space X,
-                    // applied after the object's own rotation) so they detach visually from the
-                    // mesh instead of sitting flush on its surface.
                     if (showExterior && exteriorVertexCount > 0) {
                         GL30.glEnable(GL30.GL_POLYGON_OFFSET_FILL);
                         GL30.glPolygonOffset(-1.0f, -1.0f);
@@ -348,9 +392,7 @@ public class SingleObjectRenderer implements Runnable
 
                 try { Thread.sleep(16); } catch (InterruptedException e) { break; }
             }
-        }
-        finally
-        {
+        } finally {
             MemoryUtil.memFree(pixelBuffer);
             GLFW.glfwDestroyWindow(window);
         }
@@ -358,8 +400,7 @@ public class SingleObjectRenderer implements Runnable
 
     private void captureExactContour(ShaderProgram overlayShader, Matrix4f modelMatrix, Vector3f worldNormal, Vector3f bitangent,
                                      Vector3f worldPoint, float halfExtent, int captureWidth, int captureHeight,
-                                     int linesVao, int vertexCount)
-    {
+                                     int linesVao, int vertexCount) {
         float viewDistance = 5f;
         Vector3f capEye = new Vector3f(worldPoint).add(new Vector3f(worldNormal).mul(viewDistance));
         Matrix4f sliceView = new Matrix4f().lookAt(capEye, worldPoint, bitangent);
