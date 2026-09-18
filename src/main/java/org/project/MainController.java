@@ -798,29 +798,64 @@ public class MainController {
         return String.format("%.3fx %+.3fy %+.3fz = %.3f", normal.x, normal.y, normal.z, d);
     }
 
-    private String formatClassification(SherdPythonAnalyzer.SherdAnalysisResult r) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Forma: ").append(r.formClass());
-        if ("unknown".equals(r.formClass())) {
-            sb.append(" (sherdtool.py nu calculeaza inca aceasta eticheta)");
+    private static String categoryLabel(SherdShapeClassifier.Category category) {
+        switch (category) {
+            case FUND: return "Fund de vas";
+            case BUZA: return "Buza de vas";
+            case MARGINE_LATERALA: return "Margine laterala";
+            default: return "Necunoscut";
         }
-        sb.append('\n');
-        sb.append(String.format("Calitate fit: %s%n", r.quality()));
-        sb.append(String.format("Vertecsi / fete: %d / %d%n", r.nVertices(), r.nFaces()));
-        sb.append(String.format("Unitate: %s%n", r.unit()));
-        sb.append(String.format("Inaltime pastrata: %.3f%n", r.preservedHeight()));
-        sb.append(String.format("Diametru buza: %.3f%n", r.rimDiameter()));
-        sb.append(String.format("Diametru maxim: %.3f%n", r.maxDiameter()));
-        sb.append(String.format("Inaltime umar: %.3f%n", r.shoulderHeight()));
-        sb.append(String.format("Arc pastrat: %.1f°%n", r.preservedArcDeg()));
-        sb.append(String.format("Azimut sectiune: %.1f°%n", r.sectionAzimuthDeg()));
-        sb.append(String.format("RMSE fit axa: %.4f%n", r.fitResidualRmse()));
-        sb.append("Axa: ").append(r.axisDir()).append(" @ ").append(r.axisPoint()).append('\n');
-        sb.append("Extent bbox: ").append(r.bboxExtent());
-        if (r.notes() != null && !r.notes().isBlank()) {
-            sb.append("\nNote: ").append(r.notes());
+    }
+
+    /** Formateaza un SherdAnalysisMerger.MergedResult - folosit atat pt rezultatul provizoriu
+     * (SherdAnalysisMerger.pendingFromJavaOnly, afisat instant la click) cat si pt cel final
+     * (SherdAnalysisMerger.merge, dupa ce sherdtool.py raspunde). Acelasi format in ambele
+     * faze e intentionat: doar campurile placeholder ("se calculeaza...") se schimba vizibil
+     * cand Python raspunde, nu tot raportul - vezi memoria proiectului pt regulile de combinare. */
+    private String formatMergedClassification(SherdAnalysisMerger.MergedResult r) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Forma: ").append(categoryLabel(r.category))
+                .append(String.format(Locale.ROOT, " (incredere %.0f%%)%n", r.categoryConfidence * 100));
+        sb.append(String.format(Locale.ROOT, "Calitate fit Python: %s%n", r.pythonQuality));
+        sb.append(String.format(Locale.ROOT, "Vertecsi / fete: %d / %d%n", r.nVertices, r.nFaces));
+        sb.append(String.format(Locale.ROOT, "Unitate: %s%n", r.unit));
+        sb.append(String.format(Locale.ROOT, "Inaltime pastrata: %.3f%n", r.preservedHeight));
+        sb.append(String.format(Locale.ROOT, "Diametru buza: %.3f%n", r.rimDiameter));
+        sb.append(String.format(Locale.ROOT, "Diametru maxim: %.3f%n", r.maxDiameter));
+        sb.append(String.format(Locale.ROOT, "Raport forma (inaltime/raza buza): %.3f%n", r.formAspectRatio));
+        sb.append(String.format(Locale.ROOT, "Arc pastrat: %.1f°%n", r.preservedArcDeg));
+        sb.append(String.format(Locale.ROOT, "Axa: %.3f,%.3f,%.3f @ %.3f,%.3f,%.3f%n",
+                r.axisDirection.x, r.axisDirection.y, r.axisDirection.z,
+                r.axisPoint.x, r.axisPoint.y, r.axisPoint.z));
+        sb.append("Extent bbox: ").append(r.bboxExtent);
+        if (r.pythonNotes != null && !r.pythonNotes.isBlank()) {
+            sb.append("\nNote Python: ").append(r.pythonNotes);
         }
         return sb.toString();
+    }
+
+    private void updateProfileChart(LineChart<Number, Number> chart, Label statusLabel,
+                                     float[] heights, float[] radii, boolean hasProfile) {
+        if (hasProfile && heights.length >= 2 && heights.length == radii.length) {
+            chart.getData().clear();
+            XYChart.Series<Number, Number> outerSide = new XYChart.Series<>();
+            XYChart.Series<Number, Number> innerSide = new XYChart.Series<>();
+            for (int i = 0; i < heights.length; i++) {
+                outerSide.getData().add(new XYChart.Data<>(radii[i], heights[i]));
+                innerSide.getData().add(new XYChart.Data<>(-radii[i], heights[i]));
+            }
+            chart.getData().addAll(outerSide, innerSide);
+            chart.setVisible(true);
+            chart.setManaged(true);
+            statusLabel.setVisible(false);
+            statusLabel.setManaged(false);
+        } else {
+            chart.setVisible(false);
+            chart.setManaged(false);
+            statusLabel.setText("Profil indisponibil pentru acest ciob.");
+            statusLabel.setVisible(true);
+            statusLabel.setManaged(true);
+        }
     }
 
     private void openObjectWindow(int objectId) {
@@ -1026,14 +1061,24 @@ public class MainController {
         profileStatusLabel.setManaged(false);
 
         classifyButton.setOnAction(e -> {
-            classifyButton.setText("Se analizeaza...");
             classifyButton.setDisable(true);
-            classifyResultArea.setText("Se ruleaza sherdtool.py, poate dura cateva zeci de secunde...");
-            profileChart.setVisible(false);
-            profileChart.setManaged(false);
-            profileStatusLabel.setVisible(false);
-            profileStatusLabel.setManaged(false);
 
+            // Faza 1 (instant): clasificare 100% Java, fara sa astepte Python.
+            float[] positions = finalTarget.getMesh().getPositions();
+            int[] indices = finalTarget.getMesh().getIndices();
+            CurvatureClassifier.Result curvatureResult = CurvatureClassifier.classify(positions, indices);
+            CurvatureClassifier.VesselAxisEstimate javaAxis = curvatureResult.exteriorAxisEstimate;
+            GhostVesselGenerator.VesselProfile javaProfile = GhostVesselGenerator.extractProfile(finalTarget, javaAxis);
+            SherdShapeClassifier.Result shape = SherdShapeClassifier.classify(positions, indices, javaAxis, javaProfile);
+
+            classifyButton.setText("Se completeaza cu Python...");
+            SherdAnalysisMerger.MergedResult provisional = SherdAnalysisMerger.pendingFromJavaOnly(
+                    new File(meshSourcePath).getName(), positions.length / 3, indices.length / 3, javaAxis, shape, javaProfile);
+            classifyResultArea.setText(formatMergedClassification(provisional)
+                    + "\n\n(se ruleaza sherdtool.py pentru date suplimentare, poate dura cateva zeci de secunde...)");
+            updateProfileChart(profileChart, profileStatusLabel, javaProfile.heights, javaProfile.radii, true);
+
+            // Faza 2 (in fundal): sherdtool.py, apoi combinam cu ce a calculat deja Java.
             Task<SherdPythonAnalyzer.SherdAnalysisResult> classifyTask = new Task<>() {
                 @Override
                 protected SherdPythonAnalyzer.SherdAnalysisResult call() throws Exception {
@@ -1043,33 +1088,20 @@ public class MainController {
             classifyTask.setOnSucceeded(ev -> {
                 classifyButton.setText("Clasifica ciob (Python)");
                 classifyButton.setDisable(false);
-                SherdPythonAnalyzer.SherdAnalysisResult result = classifyTask.getValue();
-                classifyResultArea.setText(formatClassification(result));
-
-                if (result.hasProfile()) {
-                    profileChart.getData().clear();
-                    XYChart.Series<Number, Number> outerSide = new XYChart.Series<>();
-                    XYChart.Series<Number, Number> innerSide = new XYChart.Series<>();
-                    float[] h = result.profileHeights();
-                    float[] r = result.profileRadii();
-                    for (int i = 0; i < h.length; i++) {
-                        outerSide.getData().add(new XYChart.Data<>(r[i], h[i]));
-                        innerSide.getData().add(new XYChart.Data<>(-r[i], h[i]));
-                    }
-                    profileChart.getData().addAll(outerSide, innerSide);
-                    profileChart.setVisible(true);
-                    profileChart.setManaged(true);
-                } else {
-                    profileStatusLabel.setText("Profil indisponibil: fitul de axa al sherdtool.py nu a produs o sectiune r(h) pentru acest ciob (destul de frecvent pe cioburi reale).");
-                    profileStatusLabel.setVisible(true);
-                    profileStatusLabel.setManaged(true);
-                }
+                SherdPythonAnalyzer.SherdAnalysisResult pythonResult = classifyTask.getValue();
+                SherdAnalysisMerger.MergedResult merged =
+                        SherdAnalysisMerger.merge(pythonResult, javaAxis, shape, javaProfile);
+                classifyResultArea.setText(formatMergedClassification(merged));
+                updateProfileChart(profileChart, profileStatusLabel, merged.profileHeights, merged.profileRadii, merged.hasProfile());
             });
             classifyTask.setOnFailed(ev -> {
                 classifyButton.setText("Clasifica ciob (Python)");
                 classifyButton.setDisable(false);
                 Throwable ex = classifyTask.getException();
-                classifyResultArea.setText("Eroare: " + (ex != null ? ex.getMessage() : "necunoscuta"));
+                classifyResultArea.setText(formatMergedClassification(provisional)
+                        + "\n\n(sherdtool.py a esuat, se afiseaza doar analiza locala Java: "
+                        + (ex != null ? ex.getMessage() : "eroare necunoscuta") + ")");
+                // profilul Java ramane deja afisat din faza 1 - nu il stergem la esecul Python.
             });
 
             Thread classifyThread = new Thread(classifyTask);
