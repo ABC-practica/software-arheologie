@@ -3,16 +3,21 @@ package org.project.engine;
 import org.joml.Vector3f;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 // Testeaza OpenGLRenderer.buildAxisOverlayGeometry - constructia liniilor GL_LINES pt cele
-// 3 cercuri (jos/mijloc/sus) + axa care le uneste, afisate in fereastra principala cand
-// selectezi un ciob. Pur geometrie (fara context OpenGL), deci testabila direct.
+// 5 inele (esantionate la 5 inaltimi de-a lungul ciobului, fiecare cu raza REALA gasita in
+// mesh la acea inaltime, nu o raza fixa) + axa care le uneste, afisate in fereastra
+// principala cand selectezi un ciob. Pur geometrie (fara context OpenGL), deci testabila
+// direct.
 class AxisOverlayGeometryTest
 {
     @Test
-    void producesThreeCirclesPlusAxisLineWithCorrectVertexCount()
+    void producesFiveRingsPlusAxisLineWithCorrectVertexCount()
     {
         float[] positions = {0, -1, 0,  1, 0, 0,  0, 1, 0,  -1, 0, 0};
         CurvatureClassifier.VesselAxisEstimate axis =
@@ -20,52 +25,62 @@ class AxisOverlayGeometryTest
 
         float[] lineData = OpenGLRenderer.buildAxisOverlayGeometry(positions, axis);
 
-        // 3 cercuri x 48 segmente x 2 capete + 1 segment pt axa (2 capete) = 3*48*2 + 2
-        assertEquals((3 * 48 * 2 + 2) * 3, lineData.length);
+        // 5 inele x 48 segmente x 2 capete + 1 segment pt axa (2 capete) = 5*48*2 + 2
+        assertEquals((5 * 48 * 2 + 2) * 3, lineData.length);
     }
 
     @Test
-    void everyCirclePointIsAtEstimatedRadiusFromItsCircleCenter()
+    void everyRingSamplesTheActualMeshRadiusAtItsOwnHeight()
     {
-        // Toate punctele de mesh au acelasi t de-a lungul axei (y=0), deci span=0 -> cele
-        // 3 cercuri sunt separate doar de marja minima (radius*0.3), usor de localizat.
-        float[] positions = {1, 0, 0,  0, 0, 1,  -1, 0, 0,  0, 0, -1};
+        // 5 inele de puncte reale in mesh, exact la inaltimile pe care algoritmul le va
+        // alege (span/4 intre tMin=-2 si tMax=2 da exact -2,-1,0,1,2 pt 5 inele), toate la
+        // aceeasi raza cunoscuta - fiecare inel ar trebui sa gaseasca exact raza asta din
+        // punctele reale, nu o valoare fixa din axis.radius.
         float radius = 3.0f;
+        int pointsPerRing = 8;
+        List<Float> verts = new ArrayList<>();
+        for (int ring = 0; ring < 5; ring++)
+        {
+            float y = -2 + ring; // -2,-1,0,1,2
+            for (int i = 0; i < pointsPerRing; i++)
+            {
+                double angle = 2 * Math.PI * i / pointsPerRing;
+                verts.add((float) Math.cos(angle) * radius);
+                verts.add(y);
+                verts.add((float) Math.sin(angle) * radius);
+            }
+        }
+        float[] positions = toArray(verts);
         CurvatureClassifier.VesselAxisEstimate axis =
-                new CurvatureClassifier.VesselAxisEstimate(new Vector3f(0, 1, 0), new Vector3f(0, 0, 0), radius, true);
+                new CurvatureClassifier.VesselAxisEstimate(new Vector3f(0, 1, 0), new Vector3f(0, 0, 0), 99f, true);
 
         float[] lineData = OpenGLRenderer.buildAxisOverlayGeometry(positions, axis);
 
-        // Ultimele 2 puncte (6 floats) sunt capetele axei, nu puncte de cerc - le excludem.
-        int circleFloats = lineData.length - 6;
-        for (int i = 0; i < circleFloats; i += 3)
+        // Ultimele 2 puncte (6 floats) sunt capetele axei, nu puncte de inel - le excludem.
+        int ringFloats = lineData.length - 6;
+        for (int i = 0; i < ringFloats; i += 3)
         {
-            Vector3f p = new Vector3f(lineData[i], lineData[i + 1], lineData[i + 2]);
-            // Centrul cercului lui e la aceeasi inaltime Y ca punctul (axa e verticala,
-            // toate cercurile perpendiculare pe Y) - distanta pe planul XZ trebuie sa fie exact raza.
-            float distXZ = (float) Math.sqrt(p.x * p.x + p.z * p.z);
-            assertEquals(radius, distXZ, 1e-3f, "punct de cerc la index " + i + " nu e la raza asteptata");
+            float x = lineData[i], z = lineData[i + 2];
+            float distXZ = (float) Math.sqrt(x * x + z * z);
+            assertEquals(radius, distXZ, 1e-2f, "punctul de inel la index " + i + " nu e la raza reala din mesh");
         }
     }
 
     @Test
-    void axisLineEndpointsMatchOutermostCircleCentersIncludingMargin()
+    void axisLineEndpointsMatchTheSherdsOwnHeightExtentExactly()
     {
-        // Mesh cu extindere cunoscuta pe axa Y: t in [-1, 1] (span=2). Marja = max(0.3*span, 0.3*radius).
-        float radius = 1.0f;
+        // Fara marja - capetele axei coincid exact cu tMin/tMax proiectate pe axa Y.
         float[] positions = {0, -1, 0,  0.1f, 1, 0};
         CurvatureClassifier.VesselAxisEstimate axis =
-                new CurvatureClassifier.VesselAxisEstimate(new Vector3f(0, 1, 0), new Vector3f(0, 0, 0), radius, true);
+                new CurvatureClassifier.VesselAxisEstimate(new Vector3f(0, 1, 0), new Vector3f(0, 0, 0), 1.0f, true);
 
         float[] lineData = OpenGLRenderer.buildAxisOverlayGeometry(positions, axis);
         int n = lineData.length;
         float bottomY = lineData[n - 6 + 1];
         float topY = lineData[n - 3 + 1];
 
-        float span = 2.0f; // tMax(1) - tMin(-1), proiectat pe axa Y
-        float margin = Math.max(span * 0.3f, radius * 0.3f);
-        assertEquals(-1 - margin, bottomY, 1e-3f);
-        assertEquals(1 + margin, topY, 1e-3f);
+        assertEquals(-1f, bottomY, 1e-3f);
+        assertEquals(1f, topY, 1e-3f);
     }
 
     @Test
@@ -97,5 +112,12 @@ class AxisOverlayGeometryTest
         {
             assertTrue(Float.isFinite(v));
         }
+    }
+
+    private static float[] toArray(List<Float> list)
+    {
+        float[] array = new float[list.size()];
+        for (int i = 0; i < array.length; i++) array[i] = list.get(i);
+        return array;
     }
 }
