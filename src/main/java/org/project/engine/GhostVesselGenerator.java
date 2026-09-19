@@ -10,12 +10,31 @@ import java.util.Locale;
 
 public class GhostVesselGenerator {
 
+    /** Binned r(h) profile along an estimated vessel axis - see extractProfile(). */
+    public static class VesselProfile {
+        public final float[] heights;
+        public final float[] radii;
+
+        VesselProfile(float[] heights, float[] radii) {
+            this.heights = heights;
+            this.radii = radii;
+        }
+    }
+
     private static class ProfileData {
         float[] cylPos;
         int[] cylIdx;
     }
 
-    private static ProfileData createRevolutionProfile(SceneObject sherd, CurvatureClassifier.VesselAxisEstimate axis) {
+    /**
+     * Extracts a binned r(h) profile of a sherd along an already-estimated vessel axis:
+     * bins all mesh vertices by height along the axis, takes the max radius per bin (the
+     * sherd's OUTER wall), gap-fills empty bins by linear interpolation, then smooths with
+     * a 5-bin moving average. This is the same profile GhostVesselGenerator sweeps into the
+     * ghost-vessel ring mesh, exposed here for reuse (shape classification, merging with
+     * sherdtool.py's own r(h) profile when that one is unavailable - see [[project_sherd_shape_classification]]).
+     */
+    public static VesselProfile extractProfile(SceneObject sherd, CurvatureClassifier.VesselAxisEstimate axis) {
         float[] pos = sherd.getMesh().getPositions();
         Vector3f dir = new Vector3f(axis.axisDirection);
         if (dir.lengthSquared() < 1e-12f) dir.set(0, 1, 0); else dir.normalize();
@@ -73,6 +92,24 @@ public class GhostVesselGenerator {
             }
             smoothRadii[i] = sum / c;
         }
+
+        float[] heights = new float[BINS];
+        for (int i = 0; i < BINS; i++) {
+            heights[i] = hMin + (i / (float) (BINS - 1)) * (hMax - hMin);
+        }
+
+        return new VesselProfile(heights, smoothRadii);
+    }
+
+    private static ProfileData createRevolutionProfile(SceneObject sherd, CurvatureClassifier.VesselAxisEstimate axis) {
+        VesselProfile profile = extractProfile(sherd, axis);
+        float[] heights = profile.heights;
+        float[] smoothRadii = profile.radii;
+        int BINS = heights.length;
+        float hMin = heights[0], hMax = heights[BINS - 1];
+
+        Vector3f dir = new Vector3f(axis.axisDirection);
+        if (dir.lengthSquared() < 1e-12f) dir.set(0, 1, 0); else dir.normalize();
 
         Vector3f helper = Math.abs(dir.x) < 0.9f ? new Vector3f(1, 0, 0) : new Vector3f(0, 1, 0);
         Vector3f u = new Vector3f(helper).sub(new Vector3f(dir).mul(helper.dot(dir)));

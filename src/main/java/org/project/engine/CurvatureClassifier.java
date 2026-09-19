@@ -359,7 +359,9 @@ public class CurvatureClassifier {
     }
 
     /** Gauss-Jordan elimination with partial pivoting. Returns null if the matrix is singular. */
-    private static double[] solveLinearSystem(double[][] a, double[] b) {
+    /** Package-visible (not just private) so other engine classes needing a small linear
+     * least-squares solve - e.g. BoundaryEdgeAnalyzer's circle fit - don't duplicate this. */
+    static double[] solveLinearSystem(double[][] a, double[] b) {
         int n = b.length;
         double[][] m = new double[n][n + 1];
         for (int i = 0; i < n; i++) {
