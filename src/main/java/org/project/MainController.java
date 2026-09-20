@@ -925,6 +925,10 @@ public class MainController {
         previewGhostBtn.setMaxWidth(Double.MAX_VALUE);
         previewGhostBtn.setDisable(true);
 
+        Button arheoAxisButton = new Button("Arheo-Axis (analiza avansata, extern)");
+        arheoAxisButton.setStyle("-fx-background-color: #6f42c1; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+        arheoAxisButton.setMaxWidth(Double.MAX_VALUE);
+
         CheckBox extCheck = new CheckBox("Curbura exterioara");
         extCheck.setDisable(true);
         extCheck.setStyle("-fx-text-fill: white;");
@@ -959,6 +963,7 @@ public class MainController {
         });
 
         final CurvatureClassifier.Result[] lastCurvatureResult = new CurvatureClassifier.Result[1];
+        final float[] lastThickness = {0f};
 
         objectRenderer.setOnCurvatureComputed(result -> {
             lastCurvatureResult[0] = result;
@@ -968,6 +973,7 @@ public class MainController {
             previewGhostBtn.setDisable(false);
 
             float distance = result.exteriorPlanePoint.distance(result.interiorPlanePoint);
+            lastThickness[0] = distance;
             widthLabel.setText(String.format("Latime estimata: %.3f unitati", distance));
 
             extEquationLabel.setText("Exterior: " + result.exteriorQuadric.toEquationText());
@@ -977,6 +983,55 @@ public class MainController {
         previewGhostBtn.setOnAction(e -> {
             if (lastCurvatureResult[0] == null) return;
             openGhostPreviewWindow(finalTarget, lastCurvatureResult[0].exteriorAxisEstimate);
+        });
+
+        arheoAxisButton.setOnAction(e -> {
+            // Grosimea e doar cosmetica pt tool-ul lor (ingroasa peretele "fantoma" din
+            // loft-ul gri) - nu afecteaza fitul axei. Folosim grosimea deja calculata daca
+            // exista ("Calculeaza curbura" a rulat), altfel un default rezonabil.
+            float thickness = lastThickness[0] > 0f ? lastThickness[0] : 0.5f;
+            boolean thicknessIsDefault = lastCurvatureResult[0] == null;
+
+            arheoAxisButton.setText("Se porneste...");
+            arheoAxisButton.setDisable(true);
+
+            // launch() poate astepta pana la cateva secunde ca sa detecteze un esec rapid
+            // (dependinta Python lipsa, fisier lipsa) - nu blocam thread-ul FX pt asta.
+            Task<Void> launchTask = new Task<>() {
+                @Override
+                protected Void call() throws Exception {
+                    ArheoAxisLauncher.launch(java.nio.file.Path.of(meshSourcePath), thickness);
+                    return null;
+                }
+            };
+            launchTask.setOnSucceeded(ev -> {
+                arheoAxisButton.setText("Arheo-Axis (analiza avansata, extern)");
+                arheoAxisButton.setDisable(false);
+                Alert info = new Alert(Alert.AlertType.INFORMATION);
+                info.setTitle("Arheo-Axis lansat");
+                info.setHeaderText(null);
+                info.setContentText("Scriptul ruleaza intr-o fereastra separata, externa. Poate dura "
+                        + "CATEVA MINUTE pana apare fereastra (RANSAC pe sectiuni reale + optimizare "
+                        + "neliniara globala) - aplicatia principala ramane utilizabila intre timp.\n\n"
+                        + "Grosime folosita: " + String.format(Locale.ROOT, "%.3f", thickness)
+                        + (thicknessIsDefault ? " (default, calculeaza curbura mai intai pt una reala)" : ""));
+                info.showAndWait();
+            });
+            launchTask.setOnFailed(ev -> {
+                arheoAxisButton.setText("Arheo-Axis (analiza avansata, extern)");
+                arheoAxisButton.setDisable(false);
+                Throwable ex = launchTask.getException();
+                Alert err = new Alert(Alert.AlertType.ERROR);
+                err.setTitle("Eroare Arheo-Axis");
+                err.setHeaderText("Nu am putut porni scriptul ai/axis.py");
+                err.setContentText(ex != null ? ex.getMessage() : "eroare necunoscuta");
+                err.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
+                err.showAndWait();
+            });
+
+            Thread launchThread = new Thread(launchTask);
+            launchThread.setDaemon(true);
+            launchThread.start();
         });
 
         Slider yawSlider = new Slider(0, 360, 0);
@@ -1002,7 +1057,7 @@ public class MainController {
         Label l2 = new Label("Sectiune verticala"); l2.setStyle("-fx-text-fill: white;");
         Label l3 = new Label("Pozitie plan"); l3.setStyle("-fx-text-fill: white;");
 
-        VBox curvatureControls = new VBox(8, computeButton, previewGhostBtn, extCheck, intCheck, widthLabel,
+        VBox curvatureControls = new VBox(8, computeButton, previewGhostBtn, arheoAxisButton, extCheck, intCheck, widthLabel,
                 extEquationLabel, intEquationLabel, spreadLabel, spreadSlider);
         curvatureControls.setStyle("-fx-padding: 15; -fx-background-color: #383838; -fx-background-radius: 5;");
 
