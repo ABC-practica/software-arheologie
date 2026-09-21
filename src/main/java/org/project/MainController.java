@@ -32,6 +32,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -413,12 +414,82 @@ public class MainController {
                 }
             });
 
-            content.getChildren().addAll(generateButton, deselectButton, deleteAllButton);
+            content.getChildren().add(generateButton);
+
+            if (filteredIds.size() == 2) {
+                Iterator<Integer> pairIterator = filteredIds.iterator();
+                SceneObject pairFirst = currentRenderer.getObjectById(pairIterator.next());
+                SceneObject pairSecond = currentRenderer.getObjectById(pairIterator.next());
+
+                Button pairMatchButton = new Button("Verifica Potrivire (extern)");
+                pairMatchButton.setStyle("-fx-background-color: #6f42c1; -fx-text-fill: white; -fx-font-weight: bold; -fx-cursor: hand;");
+                pairMatchButton.setMaxWidth(Double.MAX_VALUE);
+                pairMatchButton.setOnAction(e -> {
+                    selectionPopup.hide();
+                    if (pairFirst != null && pairSecond != null) {
+                        launchPairMatching(pairFirst.getSourcePath(), pairSecond.getSourcePath());
+                    }
+                });
+                content.getChildren().add(pairMatchButton);
+            }
+
+            content.getChildren().addAll(deselectButton, deleteAllButton);
         }
 
         selectionPopup.getContent().setAll(content);
         Stage ownerWindow = (Stage) canvasPlaceholder.getScene().getWindow();
         selectionPopup.show(ownerWindow, lastClickScreenX, lastClickScreenY);
+    }
+
+    private void launchPairMatching(String mesh1Path, String mesh2Path) {
+        TextInputDialog thicknessDialog = new TextInputDialog("0.5");
+        thicknessDialog.setTitle("Potrivire cioburi (extern)");
+        thicknessDialog.setHeaderText("Grosimea comuna a celor doua cioburi");
+        thicknessDialog.setContentText("Grosime (aceleasi unitati ca mesh-ul):");
+        Optional<String> input = thicknessDialog.showAndWait();
+        if (input.isEmpty()) return;
+
+        double thickness;
+        try {
+            thickness = Double.parseDouble(input.get().trim().replace(",", "."));
+        } catch (NumberFormatException ex) {
+            Alert err = new Alert(Alert.AlertType.ERROR);
+            err.setTitle("Valoare invalida");
+            err.setContentText("Grosimea trebuie sa fie un numar. Exemplu: 0.5");
+            err.showAndWait();
+            return;
+        }
+
+        Task<Void> launchTask = new Task<>() {
+            @Override
+            protected Void call() throws Exception {
+                PairMatchingLauncher.launch(java.nio.file.Path.of(mesh1Path), java.nio.file.Path.of(mesh2Path), thickness);
+                return null;
+            }
+        };
+        launchTask.setOnSucceeded(ev -> {
+            Alert info = new Alert(Alert.AlertType.INFORMATION);
+            info.setTitle("Potrivire lansata");
+            info.setHeaderText(null);
+            info.setContentText("Scriptul ruleaza intr-o fereastra separata, externa. Poate dura CATEVA MINUTE "
+                    + "(fit de axa pt ambele cioburi + cautare brute-force a celei mai bune pozitii) - aplicatia "
+                    + "principala ramane utilizabila intre timp.\n\nIn fereastra lor: tasta A porneste cautarea "
+                    + "automata, tasta S salveaza rezultatul (obj-uri aliniate + raport JSON).");
+            info.showAndWait();
+        });
+        launchTask.setOnFailed(ev -> {
+            Throwable ex = launchTask.getException();
+            Alert err = new Alert(Alert.AlertType.ERROR);
+            err.setTitle("Eroare Potrivire Cioburi");
+            err.setHeaderText("Nu am putut porni scriptul ai/pair_matching_standalone.py");
+            err.setContentText(ex != null ? ex.getMessage() : "eroare necunoscuta");
+            err.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
+            err.showAndWait();
+        });
+
+        Thread launchThread = new Thread(launchTask);
+        launchThread.setDaemon(true);
+        launchThread.start();
     }
 
     private void openAddShardToSectionDialog(SceneObject sectionBox) {
